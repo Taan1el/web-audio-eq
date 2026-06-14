@@ -1,0 +1,5 @@
+# nothing to build — plain MV3 extension
+*.log
+*.tmp
+.DS_Store
+node_modules/
