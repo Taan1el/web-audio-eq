@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "SoundCloud EQ",
+  "version": "1.0.0",
+  "description": "13-band graphic EQ for SoundCloud that survives track changes.",
+  "permissions": ["storage"],
+  "host_permissions": ["*://*.soundcloud.com/*"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "SoundCloud EQ"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*.soundcloud.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_start"
+    }
+  ]
+}
