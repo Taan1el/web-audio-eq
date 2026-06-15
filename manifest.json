@@ -12,6 +12,13 @@
   "content_scripts": [
     {
       "matches": ["*://*/*"],
+      "js": ["inject.js"],
+      "run_at": "document_start",
+      "all_frames": true,
+      "world": "MAIN"
+    },
+    {
+      "matches": ["*://*/*"],
       "js": ["content.js"],
       "run_at": "document_start",
       "all_frames": true
