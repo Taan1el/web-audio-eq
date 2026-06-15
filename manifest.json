@@ -1,19 +1,20 @@
 {
   "manifest_version": 3,
-  "name": "SoundCloud EQ",
-  "version": "1.0.0",
-  "description": "13-band graphic EQ for SoundCloud that survives track changes.",
+  "name": "Web Audio EQ (all sites)",
+  "version": "1.1.0",
+  "description": "13-band graphic EQ + bass/mid/treble/preamp for any website's audio & video. Re-applies on every track change so settings never reset.",
   "permissions": ["storage"],
-  "host_permissions": ["*://*.soundcloud.com/*"],
+  "host_permissions": ["*://*/*"],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "SoundCloud EQ"
+    "default_title": "Web Audio EQ"
   },
   "content_scripts": [
     {
-      "matches": ["*://*.soundcloud.com/*"],
+      "matches": ["*://*/*"],
       "js": ["content.js"],
-      "run_at": "document_start"
+      "run_at": "document_start",
+      "all_frames": true
     }
   ]
 }
