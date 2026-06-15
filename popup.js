@@ -335,6 +335,47 @@ document.getElementById("spectrumBtn").addEventListener("click", (e) => {
   setStore({ spectrum: specOn });
 });
 
+// ---- Audio status diagnostics ----
+// Pings the active tab's content script and shows, in plain language, whether
+// audio is actually being processed. Click the line to re-check.
+const statusLine = document.getElementById("statusLine");
+function setStatus(text, cls) {
+  if (!statusLine) return;
+  statusLine.textContent = text;
+  statusLine.className = "status " + (cls || "");
+}
+
+function pingStatus() {
+  if (!HAS_CHROME || !chrome.tabs) {
+    setStatus("Preview mode — load as a real extension to process audio.", "warnx");
+    return;
+  }
+  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+    const tab = tabs[0];
+    if (!tab) { setStatus("No active tab.", "bad"); return; }
+    chrome.tabs.sendMessage(tab.id, { type: "status" }, (resp) => {
+      if (chrome.runtime.lastError || !resp) {
+        setStatus("Not running on this tab. Hard-refresh the page (Ctrl+Shift+R), then reopen.", "bad");
+        return;
+      }
+      if (resp.conflicts > 0 && resp.hooked === 0) {
+        setStatus("Blocked: another audio extension grabbed the sound. Disable it (e.g. AIRS) + refresh.", "bad");
+      } else if (resp.media === 0) {
+        setStatus("Waiting for playback… press play on a track.", "warnx");
+      } else if (resp.hooked === 0) {
+        setStatus("Found " + resp.media + " media, hooking…", "warnx");
+      } else if (resp.ctx !== "running") {
+        setStatus("Hooked " + resp.hooked + " — starting audio…", "warnx");
+      } else if (!resp.enabled) {
+        setStatus("Hooked & running, but EQ is OFF for this site. Click Start EQing above.", "warnx");
+      } else {
+        setStatus("Active: EQ is processing " + resp.hooked + " stream(s).", "good");
+      }
+    });
+  });
+}
+if (statusLine) statusLine.addEventListener("click", pingStatus);
+
 // ---- Init ----
 buildGrid();
 buildNodes();
@@ -362,5 +403,6 @@ getActiveHost((host) => {
       document.getElementById("spectrumBtn").classList.add("on");
       startSpectrum();
     }
+    pingStatus();
   });
 });

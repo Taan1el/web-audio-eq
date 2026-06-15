@@ -81,6 +81,15 @@
     button.b.on { background: var(--accent); border-color: var(--accent); }
     .center-row { text-align: center; margin-top: 10px; }
 
+    .status {
+      margin-top: 10px; text-align: center; font-size: 12px;
+      padding: 7px 8px; border-radius: 5px; background: var(--panel);
+      color: var(--muted); cursor: pointer; line-height: 1.4;
+    }
+    .status.good { color: #7fd18f; }
+    .status.bad  { color: var(--accent); }
+    .status.warnx { color: #e0b84a; }
+
     .tone { display: flex; gap: 16px; margin-top: 10px; padding: 8px 4px 2px; border-top: 1px solid var(--grid); }
     .tone .t { flex: 1; }
     .tone label { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-bottom: 3px; }
@@ -144,6 +153,8 @@
     <div class="center-row">
       <button class="b" id="stopBtn">Stop EQing This Tab</button>
     </div>
+
+    <div id="statusLine" class="status" title="Click to re-check">Checking audio status…</div>
   </section>
 
   <!-- Guide -->

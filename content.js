@@ -27,12 +27,14 @@
 
   const HOST = location.hostname;
   function siteOn(map) { return !map || map[HOST] !== false; } // default: on
+  console.log("[EQ] content script running on", HOST, "| frame:", window.top === window ? "top" : "iframe");
 
   let audioCtx = null;
   let analyser = null;           // shared FFT node for the popup visualizer
   let analyserData = null;
   const hooked = new WeakSet();  // media elements already wired
   const graphs = [];             // one filter graph per element (for live updates)
+  let conflicts = 0;             // elements another audio extension grabbed first
 
   function ensureCtx() {
     if (!audioCtx) {
@@ -80,9 +82,18 @@
   // Wire one element: src -> preamp -> tone -> 13 bands -> volume -> limiter -> out.
   function hook(el) {
     if (!el || hooked.has(el)) return;
-    hooked.add(el);
     const ctx = ensureCtx();
-    const src = ctx.createMediaElementSource(el);
+    let src;
+    try {
+      src = ctx.createMediaElementSource(el);
+    } catch (e) {
+      console.warn("[EQ] could NOT hook", el.tagName, "— another audio extension grabbed it first?", e && e.message);
+      conflicts++;
+      hooked.add(el);
+      return;
+    }
+    hooked.add(el);
+    console.log("[EQ] hooked", el.tagName, "| ctx:", ctx.state);
 
     const preamp = ctx.createGain();
     const bass = ctx.createBiquadFilter();
@@ -122,8 +133,14 @@
     applyToGraph(g);
   }
 
+  let scanLogged = false;
   function scan() {
-    document.querySelectorAll("audio,video").forEach(hook);
+    const els = document.querySelectorAll("audio,video");
+    if (els.length && !scanLogged) {
+      console.log("[EQ] found", els.length, "media element(s) on", HOST);
+      scanLogged = true;
+    }
+    els.forEach(hook);
   }
 
   function resume() {
@@ -176,6 +193,21 @@
     if (msg.patch.enabled !== undefined) settings.enabled = msg.patch.enabled;
     graphs.forEach(applyToGraph);
     resume();
+  });
+
+  // Popup diagnostics: report whether audio is actually being processed so the
+  // popup can show a plain-language status instead of failing silently.
+  chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (!msg || msg.type !== "status") return;
+    sendResponse({
+      running: true,
+      media: document.querySelectorAll("audio,video").length,
+      hooked: graphs.length,
+      conflicts,
+      ctx: audioCtx ? audioCtx.state : "none",
+      enabled: settings.enabled
+    });
+    return true;
   });
 
   // ---- Spectrum visualizer: stream FFT data to the popup over a port ----
