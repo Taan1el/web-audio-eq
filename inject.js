@@ -7,6 +7,9 @@
 // This patch wraps the page's own `Audio` constructor and `createElement("audio")`
 // so any audio element they create gets appended (hidden) to the DOM. Once it's in
 // the document, content.js's MutationObserver sees it and hooks it like any other.
+//
+// Scope is deliberately limited to AUDIO only, to avoid reparenting/hiding visible
+// <video> on sites like YouTube (those are already in the DOM and need no help).
 
 (() => {
   "use strict";
@@ -19,9 +22,11 @@
   function attach(el) {
     try {
       if (!el || el.tagName !== "AUDIO") return;
-      if (el.dataset.eqAttached) return;
-      if (el.isConnected) return;
-      const hasMedia = el.currentSrc || el.src;
+      if (el.dataset.eqAttached) return;          // don't re-append
+      if (el.isConnected) return;                 // already in DOM — engine sees it
+      // Skip the empty pool/probe elements, but accept real streams whether fed by
+      // src, srcObject (MediaSource), or already-buffered data (readyState > 0).
+      const hasMedia = el.currentSrc || el.src || el.srcObject || el.readyState > 0;
       if (!hasMedia) return;
       el.dataset.eqAttached = "1";
       el.style.display = "none";
@@ -34,10 +39,13 @@
   function watch(el) {
     try {
       if (!el || el.tagName !== "AUDIO") return;
-      el.addEventListener("playing", () => attach(el));
+      const onPlay = () => attach(el);
+      el.addEventListener("playing", onPlay);
+      el.addEventListener("play", onPlay);        // attach() still re-checks src
     } catch (e) {}
   }
 
+  // Wrap `new Audio(...)` — preserves prototype/instanceof via Proxy.
   const RealAudio = window.Audio;
   if (typeof RealAudio === "function") {
     window.Audio = new Proxy(RealAudio, {
@@ -49,6 +57,7 @@
     });
   }
 
+  // Wrap document.createElement("audio").
   const realCreate = Document.prototype.createElement;
   Document.prototype.createElement = new Proxy(realCreate, {
     apply(target, thisArg, args) {
