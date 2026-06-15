@@ -127,6 +127,15 @@
     out.connect(comp);
     comp.connect(ctx.destination);
 
+    // CRITICAL: a freshly created AudioContext is "suspended". On MSE players
+    // (SoundCloud) the hooked element's media pipeline is gated on ctx state, so
+    // a suspended ctx stalls it (buffered=0, readyState=0, no playback/no detect).
+    // The page already had a user gesture (the play click), so resume() succeeds
+    // here even though we're outside the gesture call stack.
+    if (ctx.state === "suspended") {
+      ctx.resume().then(() => console.log("[EQ] ctx resumed at hook:", ctx.state)).catch(() => {});
+    }
+
     const g = { preamp, bass, mid, treble, filters, out, comp };
     graphs.push(g);
     if (analyser) { try { comp.connect(analyser); } catch (e) {} } // feed the visualizer
