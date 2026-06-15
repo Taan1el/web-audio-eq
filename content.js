@@ -208,7 +208,7 @@
   // popup can show a plain-language status instead of failing silently.
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (!msg || msg.type !== "status") return;
-    sendResponse({
+    const reply = () => sendResponse({
       running: true,
       media: document.querySelectorAll("audio,video").length,
       hooked: graphs.length,
@@ -216,7 +216,17 @@
       ctx: audioCtx ? audioCtx.state : "none",
       enabled: settings.enabled
     });
-    return true;
+    // FRAME RACE FIX: content.js runs in EVERY frame (all_frames). The popup
+    // broadcasts "status" to all of them, but Chrome delivers only the FIRST
+    // reply to the popup's callback. SoundCloud (and most sites) keep the audio
+    // in the TOP frame while empty ad/widget iframes have none — and an empty
+    // iframe often answers first, masking the real "Active" frame. So a frame
+    // that actually HAS media replies instantly (wins the race); empty frames
+    // reply late, only used when no frame has any media.
+    const media = document.querySelectorAll("audio,video").length;
+    if (media > 0) reply();
+    else setTimeout(reply, 150);
+    return true; // async sendResponse
   });
 
   // ---- Spectrum visualizer: stream FFT data to the popup over a port ----
