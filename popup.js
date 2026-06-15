@@ -344,36 +344,62 @@ function setStatus(text, cls) {
   statusLine.textContent = text;
   statusLine.className = "status " + (cls || "");
 }
+// Auto-poll: SoundCloud (and similar players) attach + hook their audio LAZILY,
+// a few seconds after you press play. A one-shot ping at popup-open time can
+// therefore catch a transient "no media yet" / "not hooked yet" state and look
+// broken even though the EQ engages moments later. So we keep re-checking on a
+// timer until we reach the steady "Active" state (or the popup closes).
+let statusTimer = null;
+function stopStatusPoll() { if (statusTimer) { clearTimeout(statusTimer); statusTimer = null; } }
+function scheduleStatusPoll() { stopStatusPoll(); statusTimer = setTimeout(pingStatus, 1500); }
 
 function pingStatus() {
   if (!HAS_CHROME || !chrome.tabs) {
     setStatus("Preview mode — load as a real extension to process audio.", "warnx");
     return;
   }
+  stopStatusPoll();
   chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
     const tab = tabs[0];
     if (!tab) { setStatus("No active tab.", "bad"); return; }
-    chrome.tabs.sendMessage(tab.id, { type: "status" }, (resp) => {
-      if (chrome.runtime.lastError || !resp) {
-        setStatus("Not running on this tab. Hard-refresh the page (Ctrl+Shift+R), then reopen.", "bad");
-        return;
-      }
-      if (resp.conflicts > 0 && resp.hooked === 0) {
-        setStatus("Blocked: another audio extension grabbed the sound. Disable it (e.g. AIRS) + refresh.", "bad");
-      } else if (resp.media === 0) {
-        setStatus("Waiting for playback… press play on a track.", "warnx");
-      } else if (resp.hooked === 0) {
-        setStatus("Found " + resp.media + " media, hooking…", "warnx");
-      } else if (resp.ctx !== "running") {
-        setStatus("Hooked " + resp.hooked + " — starting audio…", "warnx");
-      } else if (!resp.enabled) {
-        setStatus("Hooked & running, but EQ is OFF for this site. Click Start EQing above.", "warnx");
-      } else {
-        setStatus("Active: EQ is processing " + resp.hooked + " stream(s).", "good");
-      }
-    });
+    let answered = false;
+    try {
+      chrome.tabs.sendMessage(tab.id, { type: "status" }, (resp) => {
+        answered = true;
+        if (chrome.runtime.lastError || !resp) {
+          setStatus("Not running on this tab. Hard-refresh the page (Ctrl+Shift+R), then reopen.", "bad");
+          scheduleStatusPoll(); // content script may still be loading
+          return;
+        }
+        if (resp.conflicts > 0 && resp.hooked === 0) {
+          setStatus("Blocked: another audio extension grabbed the sound. Disable it (e.g. AIRS) + refresh.", "bad");
+        } else if (resp.media === 0) {
+          setStatus("Waiting for playback… press play on a track.", "warnx");
+          scheduleStatusPoll();
+        } else if (resp.hooked === 0) {
+          setStatus("Found " + resp.media + " media, hooking…", "warnx");
+          scheduleStatusPoll();
+        } else if (resp.ctx !== "running") {
+          setStatus("Hooked " + resp.hooked + " — starting audio…", "warnx");
+          scheduleStatusPoll();
+        } else if (!resp.enabled) {
+          setStatus("Hooked & running, but EQ is OFF for this site. Click Start EQing above.", "warnx");
+        } else {
+          setStatus("Active: EQ is processing " + resp.hooked + " stream(s).", "good");
+          // steady state reached — stop polling
+        }
+      });
+    } catch (e) {
+      setStatus("Not running on this tab. Hard-refresh the page, then reopen.", "bad");
+      return;
+    }
+    // If the callback never fires (no content script), show guidance + retry.
+    setTimeout(() => {
+      if (!answered) { setStatus("Not running on this tab. Hard-refresh the page (Ctrl+Shift+R), then reopen.", "bad"); scheduleStatusPoll(); }
+    }, 800);
   });
 }
+window.addEventListener("unload", stopStatusPoll);
 if (statusLine) statusLine.addEventListener("click", pingStatus);
 
 // ---- Init ----
