@@ -29,6 +29,8 @@
   function siteOn(map) { return !map || map[HOST] !== false; } // default: on
 
   let audioCtx = null;
+  let analyser = null;           // shared FFT node for the popup visualizer
+  let analyserData = null;
   const hooked = new WeakSet();  // media elements already wired
   const graphs = [];             // one filter graph per element (for live updates)
 
@@ -38,6 +40,20 @@
       audioCtx = new Ctx();
     }
     return audioCtx;
+  }
+
+  // Lazily create one shared AnalyserNode and feed every graph into it. It has no
+  // onward connection, so it only reads the signal — it doesn't alter the audio.
+  function ensureAnalyser() {
+    const ctx = ensureCtx();
+    if (!analyser) {
+      analyser = ctx.createAnalyser();
+      analyser.fftSize = 1024;
+      analyser.smoothingTimeConstant = 0.8;
+      analyserData = new Uint8Array(analyser.frequencyBinCount);
+      graphs.forEach((g) => { try { g.comp.connect(analyser); } catch (e) {} });
+    }
+    return analyser;
   }
 
   // Push current settings into one graph.
@@ -102,6 +118,7 @@
 
     const g = { preamp, bass, mid, treble, filters, out, comp };
     graphs.push(g);
+    if (analyser) { try { comp.connect(analyser); } catch (e) {} } // feed the visualizer
     applyToGraph(g);
   }
 
@@ -159,5 +176,32 @@
     if (msg.patch.enabled !== undefined) settings.enabled = msg.patch.enabled;
     graphs.forEach(applyToGraph);
     resume();
+  });
+
+  // ---- Spectrum visualizer: stream FFT data to the popup over a port ----
+  chrome.runtime.onConnect.addListener((port) => {
+    if (port.name !== "spectrum") return;
+    ensureAnalyser();
+    resume();
+    const N = 64; // number of bars sent to the popup
+    let raf = 0;
+    const tick = () => {
+      if (!analyser) return;
+      analyser.getByteFrequencyData(analyserData);
+      const bins = analyser.frequencyBinCount;
+      const bars = new Array(N);
+      for (let b = 0; b < N; b++) {
+        let f0 = Math.floor(Math.pow(bins, b / N));
+        let f1 = Math.floor(Math.pow(bins, (b + 1) / N));
+        if (f1 <= f0) f1 = f0 + 1;
+        let max = 0;
+        for (let i = f0; i < f1 && i < bins; i++) if (analyserData[i] > max) max = analyserData[i];
+        bars[b] = max;
+      }
+      try { port.postMessage(bars); } catch (e) { return; }
+      raf = requestAnimationFrame(tick);
+    };
+    tick();
+    port.onDisconnect.addListener(() => cancelAnimationFrame(raf));
   });
 })();

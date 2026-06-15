@@ -16,17 +16,41 @@ const DEFAULTS = {
   gains: new Array(BANDS.length).fill(0)
 };
 
+// Bass Boost curve (warm low end).
 const BASS_BOOST = [4, 6, 8, 9, 8, 5, 2, 0, 0, 0, 0, 0, 0];
 
+// ---- SVG plot geometry (matches viewBox 0 0 660 380) ----
 const W = 660, H = 380;
 const PAD = { l: 34, r: 16, t: 18, b: 34 };
 const plotW = W - PAD.l - PAD.r;
 const plotH = H - PAD.t - PAD.b;
+
 const SVG_NS = "http://www.w3.org/2000/svg";
+
+// Graceful fallback so the popup also renders in plain-HTML previews where the
+// chrome.* extension APIs don't exist.
+const HAS_CHROME = typeof chrome !== "undefined" && !!chrome.storage && !!chrome.storage.sync;
+function getStore(defaults, cb) {
+  if (HAS_CHROME) chrome.storage.sync.get(defaults, cb);
+  else cb(defaults);
+}
+function setStore(obj) {
+  if (HAS_CHROME) chrome.storage.sync.set(obj);
+}
+function getActiveHost(cb) {
+  if (!HAS_CHROME || !chrome.tabs) { cb(""); return; }
+  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+    let host = "";
+    try { if (tabs[0] && tabs[0].url) host = new URL(tabs[0].url).hostname; } catch (e) {}
+    cb(host);
+  });
+}
 
 let settings = { ...DEFAULTS, gains: DEFAULTS.gains.slice() };
 let presets = {};
-let nodes = [];
+let nodes = []; // circle elements per band
+let currentHost = "";       // hostname of the active tab (for per-site on/off)
+let siteEnabled = {};       // { host: bool } map
 
 const svg = document.getElementById("eq");
 const curve = document.createElementNS(SVG_NS, "path");
@@ -106,6 +130,7 @@ function redraw() {
   }
 }
 
+// ---- Dragging ----
 let dragIdx = -1;
 function startDrag(e) {
   dragIdx = parseInt(e.currentTarget.dataset.i, 10);
@@ -117,7 +142,7 @@ function onDrag(e) {
   if (dragIdx < 0) return;
   const rect = svg.getBoundingClientRect();
   const py = ((e.clientY - rect.top) / rect.height) * H;
-  settings.gains[dragIdx] = Math.round(dbFromY(py) * 2) / 2;
+  settings.gains[dragIdx] = Math.round(dbFromY(py) * 2) / 2; // 0.5 dB steps
   redraw();
   sendLive({ gains: settings.gains });
 }
@@ -129,8 +154,9 @@ function endDrag(e) {
   persist({ gains: settings.gains });
 }
 
+// ---- Talk to the content script ----
 function sendLive(patch) {
-  if (!chrome.tabs) return;
+  if (!HAS_CHROME || !chrome.tabs) return;
   chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
     if (!tabs[0]) return;
     chrome.tabs.sendMessage(tabs[0].id, { type: "live", patch }, () => chrome.runtime.lastError);
@@ -139,9 +165,10 @@ function sendLive(patch) {
 let persistTimer = null;
 function persist(obj) {
   clearTimeout(persistTimer);
-  persistTimer = setTimeout(() => chrome.storage.sync.set(obj), 200);
+  persistTimer = setTimeout(() => setStore(obj), 200);
 }
 
+// ---- Volume slider ----
 const volume = document.getElementById("volume");
 volume.addEventListener("input", () => {
   settings.volume = parseFloat(volume.value);
@@ -149,6 +176,7 @@ volume.addEventListener("input", () => {
   persist({ volume: settings.volume });
 });
 
+// ---- Tone sliders: bass / mid / treble / preamp (dB) ----
 const TONE = ["bass", "mid", "treble", "preamp"];
 function toneLabel(name) {
   const el = document.getElementById(name + "Val");
@@ -164,36 +192,45 @@ TONE.forEach((name) => {
   });
 });
 
+// ---- Buttons ----
 const stopBtn = document.getElementById("stopBtn");
 function refreshStopBtn() {
-  stopBtn.textContent = settings.enabled ? "Stop EQing" : "Start EQing";
+  const where = currentHost || "This Tab";
+  stopBtn.textContent = (settings.enabled ? "Stop EQing " : "Start EQing ") + where;
   stopBtn.classList.toggle("on", !settings.enabled);
 }
 stopBtn.addEventListener("click", () => {
   settings.enabled = !settings.enabled;
+  if (currentHost) siteEnabled[currentHost] = settings.enabled; // remember per site
   refreshStopBtn();
   sendLive({ enabled: settings.enabled });
-  chrome.storage.sync.set({ enabled: settings.enabled });
+  setStore({ siteEnabled });
 });
 
 document.getElementById("reset").addEventListener("click", () => {
   settings.gains = new Array(BANDS.length).fill(0);
-  TONE.forEach((n) => { settings[n] = 0; document.getElementById(n).value = 0; toneLabel(n); });
+  TONE.forEach((n) => {
+    settings[n] = 0;
+    document.getElementById(n).value = 0;
+    toneLabel(n);
+  });
   redraw();
   const patch = { gains: settings.gains, bass: 0, mid: 0, treble: 0, preamp: 0 };
   sendLive(patch);
-  chrome.storage.sync.set(patch);
+  setStore(patch);
 });
 
 document.getElementById("bassBoost").addEventListener("click", () => {
   settings.gains = BASS_BOOST.slice();
   redraw();
   sendLive({ gains: settings.gains });
-  chrome.storage.sync.set({ gains: settings.gains });
+  setStore({ gains: settings.gains });
 });
 
+// ---- Presets ----
 const nameInput = document.getElementById("presetName");
 const presetList = document.getElementById("presetList");
+
 function refreshPresetList() {
   presetList.innerHTML = "";
   Object.keys(presets).forEach((name) => {
@@ -209,41 +246,121 @@ document.getElementById("savePreset").addEventListener("click", () => {
     gains: settings.gains.slice(),
     bass: settings.bass, mid: settings.mid, treble: settings.treble, preamp: settings.preamp
   };
-  chrome.storage.sync.set({ presets });
+  setStore({ presets });
   refreshPresetList();
 });
 document.getElementById("deletePreset").addEventListener("click", () => {
   const name = nameInput.value.trim();
   if (!name || !presets[name]) return;
   delete presets[name];
-  chrome.storage.sync.set({ presets });
+  setStore({ presets });
   refreshPresetList();
 });
+// Selecting/typing an existing preset name loads it.
 nameInput.addEventListener("change", () => {
   const name = nameInput.value.trim();
   const p = presets[name];
   if (!p) return;
-  settings.gains = (p.gains || DEFAULTS.gains).slice();
+  const obj = Array.isArray(p) ? { gains: p } : p; // back-compat with old presets
+  settings.gains = (obj.gains || DEFAULTS.gains).slice();
   TONE.forEach((n) => {
-    if (p[n] !== undefined) { settings[n] = p[n]; document.getElementById(n).value = p[n]; toneLabel(n); }
+    if (obj[n] !== undefined) {
+      settings[n] = obj[n];
+      document.getElementById(n).value = obj[n];
+      toneLabel(n);
+    }
   });
   redraw();
-  const patch = { gains: settings.gains, bass: settings.bass, mid: settings.mid, treble: settings.treble, preamp: settings.preamp };
+  const patch = {
+    gains: settings.gains,
+    bass: settings.bass, mid: settings.mid, treble: settings.treble, preamp: settings.preamp
+  };
   sendLive(patch);
-  chrome.storage.sync.set(patch);
+  setStore(patch);
+});
+
+// ---- Tabs ----
+document.querySelectorAll(".tab").forEach((tab) => {
+  tab.addEventListener("click", () => {
+    document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
+    document.querySelectorAll(".pane").forEach((p) => p.classList.remove("active"));
+    tab.classList.add("active");
+    document.querySelector(`.pane[data-pane="${tab.dataset.tab}"]`).classList.add("active");
+  });
+});
+
+// ---- Spectrum visualizer ----
+// Opens a port to the active tab's content script; it streams FFT bars which we
+// draw on a canvas behind the EQ curve.
+const canvas = document.getElementById("spectrum");
+const cctx = canvas.getContext("2d");
+let specPort = null;
+let specOn = false;
+
+function sizeCanvas() {
+  const r = canvas.parentElement.getBoundingClientRect();
+  canvas.width = Math.max(1, Math.round(r.width));
+  canvas.height = Math.max(1, Math.round(r.height));
+}
+function drawBars(bars) {
+  if (!cctx) return;
+  const Wd = canvas.width, Hd = canvas.height;
+  cctx.clearRect(0, 0, Wd, Hd);
+  const n = bars.length, bw = Wd / n;
+  cctx.fillStyle = "rgba(180, 200, 220, 0.22)";
+  for (let i = 0; i < n; i++) {
+    const h = (bars[i] / 255) * Hd;
+    cctx.fillRect(i * bw, Hd - h, bw * 0.85, h);
+  }
+}
+function startSpectrum() {
+  if (!HAS_CHROME || !chrome.tabs) return;
+  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+    if (!tabs[0]) return;
+    sizeCanvas();
+    try { specPort = chrome.tabs.connect(tabs[0].id, { name: "spectrum" }); }
+    catch (e) { return; }
+    specPort.onMessage.addListener(drawBars);
+    specPort.onDisconnect.addListener(() => { specPort = null; });
+  });
+}
+function stopSpectrum() {
+  if (specPort) { try { specPort.disconnect(); } catch (e) {} specPort = null; }
+  if (cctx) cctx.clearRect(0, 0, canvas.width, canvas.height);
+}
+document.getElementById("spectrumBtn").addEventListener("click", (e) => {
+  specOn = !specOn;
+  e.currentTarget.classList.toggle("on", specOn);
+  if (specOn) startSpectrum(); else stopSpectrum();
+  setStore({ spectrum: specOn });
 });
 
 // ---- Init ----
 buildGrid();
 buildNodes();
-chrome.storage.sync.get({ ...DEFAULTS, presets: {} }, (s) => {
-  settings.volume = s.volume;
-  settings.enabled = s.enabled;
-  settings.gains = Array.isArray(s.gains) && s.gains.length === BANDS.length ? s.gains.slice() : DEFAULTS.gains.slice();
-  presets = s.presets || {};
-  volume.value = settings.volume;
-  TONE.forEach((n) => { settings[n] = s[n]; document.getElementById(n).value = s[n]; toneLabel(n); });
-  refreshStopBtn();
-  refreshPresetList();
-  redraw();
+getActiveHost((host) => {
+  currentHost = host;
+  getStore({ ...DEFAULTS, siteEnabled: {}, presets: {}, spectrum: false }, (s) => {
+    siteEnabled = s.siteEnabled || {};
+    settings.enabled = host ? (siteEnabled[host] !== false) : true; // per-site
+    settings.volume = s.volume;
+    settings.gains = Array.isArray(s.gains) && s.gains.length === BANDS.length
+      ? s.gains.slice()
+      : DEFAULTS.gains.slice();
+    presets = s.presets || {};
+    volume.value = settings.volume;
+    TONE.forEach((n) => {
+      settings[n] = s[n];
+      document.getElementById(n).value = s[n];
+      toneLabel(n);
+    });
+    refreshStopBtn();
+    refreshPresetList();
+    redraw();
+    if (s.spectrum) {
+      specOn = true;
+      document.getElementById("spectrumBtn").classList.add("on");
+      startSpectrum();
+    }
+  });
 });
