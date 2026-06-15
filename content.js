@@ -1,6 +1,6 @@
-// content.js — runs inside every soundcloud.com page.
-// Routes every <audio> element through a 13-band graphic EQ (Web Audio) and
-// re-hooks every NEW audio element SoundCloud creates on track change, so the
+// content.js — runs inside every website's page (and frames).
+// Routes every <audio>/<video> element through a 13-band graphic EQ (Web Audio)
+// and re-hooks every NEW media element a site creates on track change, so the
 // EQ never resets between songs.
 
 (() => {
@@ -10,22 +10,27 @@
   const BANDS = [5, 10, 20, 40, 80, 160, 320, 640, 1280, 2560, 5120, 10240, 20480];
   const Q = 1.4; // ~1 octave wide per band
 
+  // ---- Settings (single source of truth) ----
   const DEFAULTS = {
     enabled: true,
-    volume: 1.0,
-    preamp: 0,
-    bass: 0,
-    mid: 0,
-    treble: 0,
-    gains: new Array(BANDS.length).fill(0)
+    volume: 1.0,                 // linear output gain, 0..2 (the left slider)
+    preamp: 0,                   // input trim, dB
+    bass: 0,                     // low-shelf, dB
+    mid: 0,                      // mid peaking, dB
+    treble: 0,                   // high-shelf, dB
+    gains: new Array(BANDS.length).fill(0), // per-band graph gain in dB, -25..+25
+    siteEnabled: {}              // per-domain on/off map { host: bool }
   };
   let settings = { ...DEFAULTS, gains: DEFAULTS.gains.slice() };
 
   function dbToGain(db) { return Math.pow(10, db / 20); }
 
+  const HOST = location.hostname;
+  function siteOn(map) { return !map || map[HOST] !== false; } // default: on
+
   let audioCtx = null;
-  const hooked = new WeakSet();
-  const graphs = [];
+  const hooked = new WeakSet();  // media elements already wired
+  const graphs = [];             // one filter graph per element (for live updates)
 
   function ensureCtx() {
     if (!audioCtx) {
@@ -35,9 +40,10 @@
     return audioCtx;
   }
 
+  // Push current settings into one graph.
   function applyToGraph(g) {
     const on = settings.enabled;
-    g.out.gain.value = settings.volume;
+    g.out.gain.value = settings.volume; // volume always applies
     g.preamp.gain.value = on ? dbToGain(settings.preamp) : 1;
     g.bass.gain.value   = on ? settings.bass   : 0;
     g.mid.gain.value    = on ? settings.mid    : 0;
@@ -46,8 +52,16 @@
       const v = Array.isArray(settings.gains) ? (settings.gains[i] || 0) : 0;
       g.filters[i].gain.value = on ? v : 0;
     }
+    if (on) {
+      g.comp.threshold.value = -3;
+      g.comp.ratio.value = 12;
+    } else {
+      g.comp.threshold.value = 0;
+      g.comp.ratio.value = 1;
+    }
   }
 
+  // Wire one element: src -> preamp -> tone -> 13 bands -> volume -> limiter -> out.
   function hook(el) {
     if (!el || hooked.has(el)) return;
     hooked.add(el);
@@ -72,6 +86,10 @@
     });
 
     const out = ctx.createGain();
+    const comp = ctx.createDynamicsCompressor();
+    comp.knee.value = 6;
+    comp.attack.value = 0.003;
+    comp.release.value = 0.25;
 
     src.connect(preamp);
     let node = preamp;
@@ -79,9 +97,10 @@
       node.connect(n);
       node = n;
     });
-    out.connect(ctx.destination);
+    out.connect(comp);
+    comp.connect(ctx.destination);
 
-    const g = { preamp, bass, mid, treble, filters, out };
+    const g = { preamp, bass, mid, treble, filters, out, comp };
     graphs.push(g);
     applyToGraph(g);
   }
@@ -90,7 +109,10 @@
     document.querySelectorAll("audio,video").forEach(hook);
   }
 
-  // Catch new <audio> elements the instant SoundCloud adds them (track change).
+  function resume() {
+    if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
+  }
+
   const observer = new MutationObserver((mutations) => {
     for (const m of mutations) {
       if (!m.addedNodes) continue;
@@ -106,29 +128,35 @@
   setInterval(scan, 1500);
   scan();
 
-  function resume() {
-    if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
-  }
   ["click", "keydown", "play"].forEach((ev) =>
     document.addEventListener(ev, resume, true)
   );
 
+  // ---- Load saved settings ----
+  // These are global (shared across sites); only `enabled` is per-domain.
+  const GLOBAL_KEYS = ["volume", "preamp", "bass", "mid", "treble"];
+
   chrome.storage.sync.get(DEFAULTS, (saved) => {
-    settings = { ...settings, ...saved };
+    GLOBAL_KEYS.forEach((k) => { settings[k] = saved[k]; });
     settings.gains = Array.isArray(saved.gains) ? saved.gains.slice() : DEFAULTS.gains.slice();
+    settings.enabled = siteOn(saved.siteEnabled); // per-site on/off
     graphs.forEach(applyToGraph);
   });
 
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== "sync") return;
-    Object.keys(changes).forEach((k) => { settings[k] = changes[k].newValue; });
+    GLOBAL_KEYS.forEach((k) => { if (changes[k]) settings[k] = changes[k].newValue; });
+    if (changes.gains) settings.gains = changes.gains.newValue;
+    if (changes.siteEnabled) settings.enabled = siteOn(changes.siteEnabled.newValue);
     graphs.forEach(applyToGraph);
     resume();
   });
 
   chrome.runtime.onMessage.addListener((msg) => {
     if (!msg || msg.type !== "live") return;
-    Object.keys(msg.patch).forEach((k) => { settings[k] = msg.patch[k]; });
+    GLOBAL_KEYS.forEach((k) => { if (msg.patch[k] !== undefined) settings[k] = msg.patch[k]; });
+    if (msg.patch.gains !== undefined) settings.gains = msg.patch.gains;
+    if (msg.patch.enabled !== undefined) settings.enabled = msg.patch.enabled;
     graphs.forEach(applyToGraph);
     resume();
   });
