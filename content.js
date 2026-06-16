@@ -82,16 +82,32 @@
   // Wire one element: src -> preamp -> tone -> 13 bands -> volume -> limiter -> out.
   function hook(el) {
     if (!el || hooked.has(el)) return;
+
+    // CROSS-INSTANCE GUARD. A MediaElementSource can be created only ONCE per
+    // element, ever. If THIS extension already hooked it — including a now-dead
+    // ("orphaned") content-script instance left behind when the extension was
+    // reloaded while the page stayed open — a second createMediaElementSource
+    // throws "already connected". The dataset flag lives on the shared DOM
+    // element, so every content-script instance (live or orphan) can see it.
+    // Skip silently: it's our own prior hook, NOT a rival audio extension.
+    if (el.dataset.eqHooked) { hooked.add(el); return; }
+
     const ctx = ensureCtx();
     let src;
     try {
       src = ctx.createMediaElementSource(el);
     } catch (e) {
-      console.warn("[EQ] could NOT hook", el.tagName, "— another audio extension grabbed it first?", e && e.message);
-      conflicts++;
+      const dup = /already connected/i.test((e && e.message) || "");
+      // "already connected" with no rival extension = an orphaned old copy of us.
+      // Don't mislabel it as an external conflict.
+      if (!dup) {
+        console.warn("[EQ] could NOT hook", el.tagName, "— another audio extension grabbed it first?", e && e.message);
+        conflicts++;
+      }
       hooked.add(el);
       return;
     }
+    el.dataset.eqHooked = "1"; // mark so no other instance double-hooks it
     hooked.add(el);
     console.log("[EQ] hooked", el.tagName, "| ctx:", ctx.state);
 
