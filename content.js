@@ -90,15 +90,15 @@
   function hook(el) {
     if (!el || hooked.has(el)) return;
 
-    // CROSS-INSTANCE GUARD. A MediaElementSource can be created only ONCE per
-    // element, ever. If THIS extension already hooked it — including a now-dead
-    // ("orphaned") content-script instance left behind when the extension was
-    // reloaded while the page stayed open — a second createMediaElementSource
-    // throws "already connected". The dataset flag lives on the shared DOM
-    // element, so every content-script instance (live or orphan) can see it.
-    // Skip silently: it's our own prior hook, NOT a rival audio extension.
-    if (el.dataset.eqHooked) { staleHooks++; hooked.add(el); return; }
-
+    // NOTE: we deliberately do NOT early-return on el.dataset.eqHooked here.
+    // That flag lives on the shared DOM element and is set by whichever
+    // content-script instance hooked it first. But an "orphaned" instance (left
+    // behind when the extension is reloaded while the page stays open) sets the
+    // flag too — and once that orphan's renderer/AudioContext is gone, the
+    // element is actually re-sourceable again. Trusting the flag blindly would
+    // poison the element forever (permanent "stale"). Instead we always TRY to
+    // source it and let createMediaElementSource tell us the truth: it only
+    // throws "already connected" while a source is genuinely still alive.
     const ctx = ensureCtx();
     let src;
     try {
