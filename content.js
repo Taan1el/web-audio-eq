@@ -36,6 +36,36 @@
   const graphs = [];             // one filter graph per element (for live updates)
   let conflicts = 0;             // elements another audio extension grabbed first
   let staleHooks = 0;            // elements an orphaned (old) instance of US already sourced
+  let mainHooked = 0;            // EQ chains the MAIN-world splicer wired into the PAGE's own ctx
+
+  // ---- Bridge to inject.js (MAIN world) ----
+  // SoundCloud (and other Web-Audio players) source their <audio> in their OWN
+  // AudioContext, so content.js can't re-source it. inject.js splices the EQ into
+  // the page's own graph instead — but inject.js can't read chrome.storage. So we
+  // forward settings to it here, and listen for how many chains it has spliced.
+  function postToMain() {
+    try {
+      window.postMessage({
+        __eq: "settings",
+        settings: {
+          enabled: settings.enabled,
+          volume: settings.volume,
+          preamp: settings.preamp,
+          bass: settings.bass,
+          mid: settings.mid,
+          treble: settings.treble,
+          gains: settings.gains
+        }
+      }, "*");
+    } catch (e) {}
+  }
+
+  window.addEventListener("message", (e) => {
+    if (e.source !== window) return;
+    const d = e.data;
+    if (!d || d.__eq !== "state") return;
+    mainHooked = d.hooked || 0;
+  });
 
   function ensureCtx() {
     if (!audioCtx) {
@@ -231,6 +261,7 @@
     settings.gains = Array.isArray(saved.gains) ? saved.gains.slice() : DEFAULTS.gains.slice();
     settings.enabled = siteOn(saved.siteEnabled); // per-site on/off
     graphs.forEach(applyToGraph);
+    postToMain();
   });
 
   // React to persisted changes (popup writes these on release).
@@ -240,6 +271,7 @@
     if (changes.gains) settings.gains = changes.gains.newValue;
     if (changes.siteEnabled) settings.enabled = siteOn(changes.siteEnabled.newValue);
     graphs.forEach(applyToGraph);
+    postToMain();
     resume();
   });
 
@@ -251,6 +283,7 @@
     if (msg.patch.gains !== undefined) settings.gains = msg.patch.gains;
     if (msg.patch.enabled !== undefined) settings.enabled = msg.patch.enabled; // per-tab toggle
     graphs.forEach(applyToGraph);
+    postToMain();
     resume();
   });
 
@@ -261,7 +294,7 @@
     const reply = () => sendResponse({
       running: true,
       media: document.querySelectorAll("audio,video").length,
-      hooked: graphs.length,
+      hooked: graphs.length + mainHooked, // own-ctx hooks + MAIN-world splices (SoundCloud)
       conflicts,
       staleHooks,
       ctx: audioCtx ? audioCtx.state : "none",
