@@ -35,6 +35,7 @@
   const hooked = new WeakSet();  // media elements already wired
   const graphs = [];             // one filter graph per element (for live updates)
   let conflicts = 0;             // elements another audio extension grabbed first
+  let staleHooks = 0;            // elements an orphaned (old) instance of US already sourced
 
   function ensureCtx() {
     if (!audioCtx) {
@@ -90,7 +91,7 @@
     // throws "already connected". The dataset flag lives on the shared DOM
     // element, so every content-script instance (live or orphan) can see it.
     // Skip silently: it's our own prior hook, NOT a rival audio extension.
-    if (el.dataset.eqHooked) { hooked.add(el); return; }
+    if (el.dataset.eqHooked) { staleHooks++; hooked.add(el); return; }
 
     const ctx = ensureCtx();
     let src;
@@ -98,9 +99,14 @@
       src = ctx.createMediaElementSource(el);
     } catch (e) {
       const dup = /already connected/i.test((e && e.message) || "");
-      // "already connected" with no rival extension = an orphaned old copy of us.
-      // Don't mislabel it as an external conflict.
-      if (!dup) {
+      // "already connected" means a source already exists for this element. With
+      // no rival audio extension installed, that's an ORPHANED old copy of us
+      // (left over from reloading the extension while the tab stayed open) — the
+      // element can never be re-sourced, so the only cure is to close+reopen the
+      // tab. Track it so the popup can say exactly that instead of spinning.
+      if (dup) {
+        staleHooks++;
+      } else {
         console.warn("[EQ] could NOT hook", el.tagName, "— another audio extension grabbed it first?", e && e.message);
         conflicts++;
       }
@@ -229,6 +235,7 @@
       media: document.querySelectorAll("audio,video").length,
       hooked: graphs.length,
       conflicts,
+      staleHooks,
       ctx: audioCtx ? audioCtx.state : "none",
       enabled: settings.enabled
     });

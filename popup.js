@@ -376,6 +376,8 @@ function pingStatus() {
         } else if (resp.media === 0) {
           setStatus("Waiting for playback… press play on a track.", "warnx");
           scheduleStatusPoll();
+        } else if (resp.hooked === 0 && resp.staleHooks > 0) {
+          setStatus("Stale audio hook from an old tab session. CLOSE this tab (Ctrl+W) and open SoundCloud in a NEW tab.", "bad");
         } else if (resp.hooked === 0) {
           setStatus("Found " + resp.media + " media, hooking…", "warnx");
           scheduleStatusPoll();
