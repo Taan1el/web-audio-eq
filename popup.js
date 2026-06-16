@@ -62,7 +62,9 @@ function dbFromY(py) {
   return Math.max(DB_MIN, Math.min(DB_MAX, db));
 }
 
+// Build static grid + axis labels once.
 function buildGrid() {
+  // Horizontal dB grid lines + labels.
   for (let db = DB_MIN; db <= DB_MAX; db += 5) {
     const y = yFor(db);
     const line = document.createElementNS(SVG_NS, "line");
@@ -70,12 +72,14 @@ function buildGrid() {
     line.setAttribute("y1", y); line.setAttribute("y2", y);
     line.setAttribute("stroke-width", db === 0 ? 1.4 : 1);
     svg.appendChild(line);
+
     const t = document.createElementNS(SVG_NS, "text");
     t.setAttribute("x", PAD.l - 6); t.setAttribute("y", y + 3);
     t.setAttribute("text-anchor", "end");
     t.textContent = db;
     svg.appendChild(t);
   }
+  // Vertical band ticks + frequency labels.
   for (let i = 0; i < BANDS.length; i++) {
     const x = xFor(i);
     const line = document.createElementNS(SVG_NS, "line");
@@ -83,6 +87,7 @@ function buildGrid() {
     line.setAttribute("y1", PAD.t); line.setAttribute("y2", H - PAD.b);
     line.setAttribute("stroke-width", 1);
     svg.appendChild(line);
+
     const t = document.createElementNS(SVG_NS, "text");
     t.setAttribute("x", x); t.setAttribute("y", H - PAD.b + 16);
     t.setAttribute("text-anchor", "middle");
@@ -91,6 +96,7 @@ function buildGrid() {
   }
 }
 
+// Smooth curve through the nodes (Catmull-Rom -> cubic bezier).
 function curvePath() {
   const pts = settings.gains.map((g, i) => [xFor(i), yFor(g)]);
   let d = `M ${pts[0][0]} ${pts[0][1]}`;
@@ -111,6 +117,7 @@ function curvePath() {
 function buildNodes() {
   curve.setAttribute("class", "curve");
   svg.appendChild(curve);
+
   for (let i = 0; i < BANDS.length; i++) {
     const c = document.createElementNS(SVG_NS, "circle");
     c.setAttribute("class", "node");
@@ -123,6 +130,7 @@ function buildNodes() {
   }
 }
 
+// Redraw curve + node positions from current gains.
 function redraw() {
   curve.setAttribute("d", curvePath());
   for (let i = 0; i < nodes.length; i++) {
@@ -141,6 +149,7 @@ function startDrag(e) {
 function onDrag(e) {
   if (dragIdx < 0) return;
   const rect = svg.getBoundingClientRect();
+  // Map screen Y to viewBox Y (svg height is scaled via CSS).
   const py = ((e.clientY - rect.top) / rect.height) * H;
   settings.gains[dragIdx] = Math.round(dbFromY(py) * 2) / 2; // 0.5 dB steps
   redraw();

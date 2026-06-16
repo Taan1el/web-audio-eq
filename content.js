@@ -1,6 +1,6 @@
-// content.js — runs inside every website's page (and frames).
-// Routes every <audio>/<video> element through a 13-band graphic EQ (Web Audio)
-// and re-hooks every NEW media element a site creates on track change, so the
+// content.js — runs inside every soundcloud.com page.
+// Routes every <audio> element through a 13-band graphic EQ (Web Audio) and
+// re-hooks every NEW audio element SoundCloud creates on track change, so the
 // EQ never resets between songs.
 
 (() => {
@@ -63,14 +63,20 @@
   function applyToGraph(g) {
     const on = settings.enabled;
     g.out.gain.value = settings.volume; // volume always applies
+
+    // Quick tone stage.
     g.preamp.gain.value = on ? dbToGain(settings.preamp) : 1;
     g.bass.gain.value   = on ? settings.bass   : 0;
     g.mid.gain.value    = on ? settings.mid    : 0;
     g.treble.gain.value = on ? settings.treble : 0;
+
+    // 13-band graphic stage.
     for (let i = 0; i < g.filters.length; i++) {
       const v = Array.isArray(settings.gains) ? (settings.gains[i] || 0) : 0;
-      g.filters[i].gain.value = on ? v : 0;
+      g.filters[i].gain.value = on ? v : 0; // flat when EQ stopped
     }
+
+    // Soft limiter to tame clipping from big boosts; neutral when disabled.
     if (on) {
       g.comp.threshold.value = -3;
       g.comp.ratio.value = 12;
@@ -80,7 +86,7 @@
     }
   }
 
-  // Wire one element: src -> preamp -> tone -> 13 bands -> volume -> limiter -> out.
+  // Wire one <audio> element: src -> preamp -> 13 peaking filters -> limiter -> out.
   function hook(el) {
     if (!el || hooked.has(el)) return;
 
@@ -117,14 +123,19 @@
     hooked.add(el);
     console.log("[EQ] hooked", el.tagName, "| ctx:", ctx.state);
 
+    // Quick tone nodes.
     const preamp = ctx.createGain();
+
     const bass = ctx.createBiquadFilter();
     bass.type = "lowshelf"; bass.frequency.value = 150;
+
     const mid = ctx.createBiquadFilter();
     mid.type = "peaking"; mid.frequency.value = 1000; mid.Q.value = 1;
+
     const treble = ctx.createBiquadFilter();
     treble.type = "highshelf"; treble.frequency.value = 4000;
 
+    // 13-band graphic EQ nodes.
     const filters = BANDS.map((freq) => {
       const f = ctx.createBiquadFilter();
       f.type = "peaking";
@@ -134,12 +145,14 @@
       return f;
     });
 
-    const out = ctx.createGain();
+    const out = ctx.createGain(); // volume
+
     const comp = ctx.createDynamicsCompressor();
     comp.knee.value = 6;
     comp.attack.value = 0.003;
     comp.release.value = 0.25;
 
+    // Chain: src -> preamp -> bass -> mid -> treble -> 13 bands -> volume -> limiter -> out.
     src.connect(preamp);
     let node = preamp;
     [bass, mid, treble, ...filters, out].forEach((n) => {
@@ -154,7 +167,7 @@
     // a suspended ctx stalls it (buffered=0, readyState=0, no playback/no detect).
     // The page already had a user gesture (the play click), so resume() succeeds
     // here even though we're outside the gesture call stack.
-    if (ctx.state === "suspended") {
+    if (ctx.state === "suspended" && pageActivated()) {
       ctx.resume().then(() => console.log("[EQ] ctx resumed at hook:", ctx.state)).catch(() => {});
     }
 
@@ -174,10 +187,22 @@
     els.forEach(hook);
   }
 
-  function resume() {
-    if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
+  // True once this frame has had a real user gesture. Chrome only lets an
+  // AudioContext resume after one; calling resume() before that logs a noisy
+  // "AudioContext was not allowed to start" warning (harmless but spammy in
+  // gesture-less ad/embed iframes like Twitch clips). Gate resume() on this.
+  function pageActivated() {
+    try { return navigator.userActivation ? navigator.userActivation.hasBeenActive : true; }
+    catch (e) { return true; }
   }
 
+  function resume() {
+    if (audioCtx && audioCtx.state === "suspended" && pageActivated()) {
+      audioCtx.resume().then(() => console.log("[EQ] ctx resumed:", audioCtx.state)).catch(() => {});
+    }
+  }
+
+  // Catch new <audio> elements the instant SoundCloud adds them (track change).
   const observer = new MutationObserver((mutations) => {
     for (const m of mutations) {
       if (!m.addedNodes) continue;
@@ -190,7 +215,7 @@
   });
   observer.observe(document.documentElement, { childList: true, subtree: true });
 
-  setInterval(scan, 1500);
+  setInterval(scan, 1500); // safety net
   scan();
 
   ["click", "keydown", "play"].forEach((ev) =>
@@ -208,6 +233,7 @@
     graphs.forEach(applyToGraph);
   });
 
+  // React to persisted changes (popup writes these on release).
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== "sync") return;
     GLOBAL_KEYS.forEach((k) => { if (changes[k]) settings[k] = changes[k].newValue; });
@@ -217,11 +243,13 @@
     resume();
   });
 
+  // Live updates while the user drags (popup messages us directly — avoids the
+  // tiny storage.sync write quota during fast dragging).
   chrome.runtime.onMessage.addListener((msg) => {
     if (!msg || msg.type !== "live") return;
     GLOBAL_KEYS.forEach((k) => { if (msg.patch[k] !== undefined) settings[k] = msg.patch[k]; });
     if (msg.patch.gains !== undefined) settings.gains = msg.patch.gains;
-    if (msg.patch.enabled !== undefined) settings.enabled = msg.patch.enabled;
+    if (msg.patch.enabled !== undefined) settings.enabled = msg.patch.enabled; // per-tab toggle
     graphs.forEach(applyToGraph);
     resume();
   });
@@ -265,6 +293,7 @@
       const bins = analyser.frequencyBinCount;
       const bars = new Array(N);
       for (let b = 0; b < N; b++) {
+        // log-spaced bins so low frequencies aren't squashed
         let f0 = Math.floor(Math.pow(bins, b / N));
         let f1 = Math.floor(Math.pow(bins, (b + 1) / N));
         if (f1 <= f0) f1 = f0 + 1;
