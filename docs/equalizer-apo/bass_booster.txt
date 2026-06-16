@@ -1,0 +1,2 @@
+Preamp: -3 dB
+Filter: ON LSC Fc 110 Hz Gain 6 dB Q 0.7
