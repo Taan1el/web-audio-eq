@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      # No install step: the extension has no dependencies and no build.
+
+      - name: Syntax-check every script
+        run: for f in *.js tools/*.mjs; do node --check "$f"; done
+
+      - name: Repository invariants
+        run: node tools/check.mjs
+
+      # The icons are generated, so a hand-edited PNG or a change to the
+      # generator that nobody re-ran would drift from its source. Re-rendering
+      # and diffing keeps the committed files honest.
+      - name: Icons match their generator
+        run: |
+          node tools/make-icons.mjs
+          git diff --exit-code -- icons/ || {
+            echo "::error::icons/ is out of date — run 'node tools/make-icons.mjs' and commit the result"
+            exit 1
+          }
+
+  package:
+    runs-on: ubuntu-latest
+    needs: check
+    steps:
+      - uses: actions/checkout@v4
+
+      # Builds the exact zip you would upload to the Web Store, so a packaging
+      # mistake surfaces on the PR rather than at submission time.
+      - name: Build store zip
+        run: |
+          VERSION=$(node -p "require('./manifest.json').version")
+          zip -r "web-audio-eq-${VERSION}.zip" . \
+            -x '.git/*' '.github/*' 'docs/*' 'tools/*' '*.md' 'LICENSE' '.gitattributes' '.gitignore'
+          unzip -l "web-audio-eq-${VERSION}.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: extension-zip
+          path: web-audio-eq-*.zip
