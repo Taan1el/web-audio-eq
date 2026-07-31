@@ -66,7 +66,13 @@ function dbFromY(py) {
 }
 
 // Build static grid + axis labels once.
+// Everything here is decorative: the band nodes carry the frequency and gain in
+// their own labels, so an unhidden axis would just read as a wall of numbers.
 function buildGrid() {
+  const g = document.createElementNS(SVG_NS, "g");
+  g.setAttribute("aria-hidden", "true");
+  svg.appendChild(g);
+
   // Horizontal dB grid lines + labels.
   for (let db = DB_MIN; db <= DB_MAX; db += 5) {
     const y = yFor(db);
@@ -74,7 +80,7 @@ function buildGrid() {
     line.setAttribute("x1", PAD.l); line.setAttribute("x2", W - PAD.r);
     line.setAttribute("y1", y); line.setAttribute("y2", y);
     line.setAttribute("stroke-width", db === 0 ? 1.4 : 1);
-    svg.appendChild(line);
+    g.appendChild(line);
 
     // Rule every 5 dB, but only label every 10 — at this plot height the full
     // set of labels crowds into an unreadable stack.
@@ -83,7 +89,7 @@ function buildGrid() {
     t.setAttribute("x", PAD.l - 6); t.setAttribute("y", y + 3);
     t.setAttribute("text-anchor", "end");
     t.textContent = db;
-    svg.appendChild(t);
+    g.appendChild(t);
   }
   // Vertical band ticks + frequency labels.
   for (let i = 0; i < BANDS.length; i++) {
@@ -92,13 +98,13 @@ function buildGrid() {
     line.setAttribute("x1", x); line.setAttribute("x2", x);
     line.setAttribute("y1", PAD.t); line.setAttribute("y2", H - PAD.b);
     line.setAttribute("stroke-width", 1);
-    svg.appendChild(line);
+    g.appendChild(line);
 
     const t = document.createElementNS(SVG_NS, "text");
     t.setAttribute("x", x); t.setAttribute("y", H - PAD.b + 16);
     t.setAttribute("text-anchor", "middle");
     t.textContent = LABELS[i];
-    svg.appendChild(t);
+    g.appendChild(t);
   }
 }
 
@@ -120,6 +126,10 @@ function curvePath() {
   return d;
 }
 
+function bandName(i) {
+  return BANDS[i] >= 1000 ? BANDS[i] / 1000 + " kilohertz" : BANDS[i] + " hertz";
+}
+
 function buildNodes() {
   curve.setAttribute("class", "curve");
   svg.appendChild(curve);
@@ -130,7 +140,15 @@ function buildNodes() {
     c.setAttribute("cx", xFor(i));
     c.setAttribute("r", 6);
     c.dataset.i = i;
+    // Each dot is a slider in its own right, so it gets slider semantics and a
+    // tab stop. Without this the curve is mouse-only.
+    c.setAttribute("tabindex", "0");
+    c.setAttribute("role", "slider");
+    c.setAttribute("aria-label", bandName(i) + " band");
+    c.setAttribute("aria-valuemin", DB_MIN);
+    c.setAttribute("aria-valuemax", DB_MAX);
     c.addEventListener("pointerdown", startDrag);
+    c.addEventListener("keydown", onNodeKey);
     svg.appendChild(c);
     nodes.push(c);
   }
@@ -140,8 +158,44 @@ function buildNodes() {
 function redraw() {
   curve.setAttribute("d", curvePath());
   for (let i = 0; i < nodes.length; i++) {
-    nodes[i].setAttribute("cy", yFor(settings.gains[i]));
+    const g = settings.gains[i];
+    nodes[i].setAttribute("cy", yFor(g));
+    nodes[i].setAttribute("aria-valuenow", g);
+    // Bare numbers read as ambiguous; spell out the unit and the sign.
+    nodes[i].setAttribute("aria-valuetext", (g > 0 ? "+" : "") + g.toFixed(1) + " decibels");
   }
+}
+
+// ---- Keyboard control of the curve ----
+// Arrows nudge by 0.5 dB (the drag step), PageUp/Down by 5, Home flattens the
+// band and End jumps to the limit. Left/Right move focus between bands, which
+// is what a horizontal row of sliders is expected to do.
+function onNodeKey(e) {
+  const i = parseInt(e.currentTarget.dataset.i, 10);
+  const step = e.shiftKey ? 2 : 0.5;
+  let g = settings.gains[i];
+
+  switch (e.key) {
+    case "ArrowUp": g += step; break;
+    case "ArrowDown": g -= step; break;
+    case "PageUp": g += 5; break;
+    case "PageDown": g -= 5; break;
+    case "Home": g = 0; break;
+    case "End": g = g >= 0 ? DB_MAX : DB_MIN; break;
+    case "ArrowLeft":
+    case "ArrowRight": {
+      const next = i + (e.key === "ArrowRight" ? 1 : -1);
+      if (nodes[next]) { nodes[next].focus(); e.preventDefault(); }
+      return;
+    }
+    default: return;
+  }
+
+  e.preventDefault();
+  settings.gains[i] = Math.round(Math.max(DB_MIN, Math.min(DB_MAX, g)) * 2) / 2;
+  redraw();
+  sendLive({ gains: settings.gains });
+  persist({ gains: settings.gains });
 }
 
 // ---- Dragging ----
@@ -300,12 +354,31 @@ nameInput.addEventListener("change", () => {
 });
 
 // ---- Tabs ----
-document.querySelectorAll(".tab").forEach((tab) => {
-  tab.addEventListener("click", () => {
-    document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
-    document.querySelectorAll(".pane").forEach((p) => p.classList.remove("active"));
-    tab.classList.add("active");
-    document.querySelector(`.pane[data-pane="${tab.dataset.tab}"]`).classList.add("active");
+// Roving tabindex: one Tab press enters the tablist, then arrows move between
+// tabs. Tabbing through every tab to reach the controls would be tedious.
+const tabEls = [...document.querySelectorAll(".tab")];
+function selectTab(tab, focus) {
+  tabEls.forEach((t) => {
+    const on = t === tab;
+    t.classList.toggle("active", on);
+    t.setAttribute("aria-selected", on ? "true" : "false");
+    t.tabIndex = on ? 0 : -1;
+  });
+  document.querySelectorAll(".pane").forEach((p) => p.classList.remove("active"));
+  document.querySelector(`.pane[data-pane="${tab.dataset.tab}"]`).classList.add("active");
+  if (focus) tab.focus();
+}
+tabEls.forEach((tab, i) => {
+  tab.addEventListener("click", () => selectTab(tab));
+  tab.addEventListener("keydown", (e) => {
+    let next = null;
+    if (e.key === "ArrowRight") next = tabEls[(i + 1) % tabEls.length];
+    else if (e.key === "ArrowLeft") next = tabEls[(i - 1 + tabEls.length) % tabEls.length];
+    else if (e.key === "Home") next = tabEls[0];
+    else if (e.key === "End") next = tabEls[tabEls.length - 1];
+    if (!next) return;
+    e.preventDefault();
+    selectTab(next, true);
   });
 });
 

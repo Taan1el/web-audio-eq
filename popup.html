@@ -27,6 +27,9 @@
       --warn: #fbbf24;
 
       --grid: rgba(232, 237, 244, 0.07);
+      /* One focus colour everywhere, deliberately not the coral accent: focus
+         must stay legible on top of coral controls. */
+      --focus: #7dd3fc;
 
       --font-ui: "Segoe UI Variable Display", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", sans-serif;
       --font-mono: "Cascadia Mono", "Cascadia Code", ui-monospace, "SF Mono", Consolas, "Liberation Mono", monospace;
@@ -146,6 +149,7 @@
       transition: color .16s var(--ease), background .16s var(--ease);
     }
     .tab:hover { color: var(--text); }
+    .tab:focus-visible { outline: 2px solid var(--focus); outline-offset: -1px; }
     .tab.active {
       color: var(--text);
       background: linear-gradient(180deg, #262f3c, #1b212b);
@@ -207,6 +211,14 @@
       transition: r .12s var(--ease);
     }
     .node:hover { r: 8; }
+    /* SVG can't take a CSS outline, so focus is drawn as a ring on the node
+       itself — the same visual weight as the outline used elsewhere. */
+    .node:focus { outline: none; }
+    .node:focus-visible {
+      r: 8;
+      stroke: var(--focus);
+      stroke-width: 2.5;
+    }
 
     /* ---------- tone row (inside the rack) ---------- */
     .tone {
@@ -264,9 +276,11 @@
       transition: box-shadow .16s var(--ease), transform .12s var(--ease);
     }
     input[type="range"]:hover::-webkit-slider-thumb { transform: scale(1.09); }
+    /* The thumb carries focus rather than the track, so a rotated fader shows
+       its ring around the knob instead of a tilted rectangle. */
     input[type="range"]:focus-visible { outline: none; }
     input[type="range"]:focus-visible::-webkit-slider-thumb {
-      box-shadow: 0 1px 3px rgba(0, 0, 0, .7), 0 0 0 4px rgba(255, 92, 87, .3);
+      box-shadow: 0 1px 3px rgba(0, 0, 0, .7), 0 0 0 4px rgba(125, 211, 252, .45);
     }
 
     /* ---------- buttons + preset row ---------- */
@@ -295,7 +309,7 @@
     }
     .b:hover { border-color: #36404f; background: linear-gradient(180deg, #273040, #1d2431); }
     .b:active { transform: translateY(1px); }
-    .b:focus-visible { outline: 2px solid var(--coral); outline-offset: 2px; }
+    .b:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 
     /* Toggles light up coral when engaged (spectrum on, EQ stopped). */
     .b.on {
@@ -319,17 +333,20 @@
       box-shadow: inset 0 1px 2px rgba(0, 0, 0, .5);
     }
     input[type="text"]::placeholder { color: var(--dim); }
-    input[type="text"]:focus { outline: none; border-color: var(--coral); }
+    input[type="text"]:focus { outline: none; border-color: var(--focus); }
 
     /* ---------- status bar ---------- */
     .status {
       display: flex;
       align-items: center;
       gap: 10px;
+      width: 100%;
       margin-top: 10px;
       padding: 9px 13px;
+      font-family: inherit;
       font-size: 11.5px;
       line-height: 1.45;
+      text-align: left;
       color: var(--muted);
       background: var(--panel-lo);
       border: 1px solid var(--hairline);
@@ -338,6 +355,7 @@
       transition: border-color .16s var(--ease);
     }
     .status:hover { border-color: #36404f; }
+    .status:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
     .status::before {
       content: "";
       flex: none;
@@ -425,14 +443,18 @@
     <p class="caution">Loud audio can damage your hearing and your speakers. Raise levels gradually.</p>
   </header>
 
-  <div class="tabs">
-    <button type="button" class="tab active" data-tab="controls">Controls</button>
-    <button type="button" class="tab" data-tab="guide">Guide</button>
-    <button type="button" class="tab" data-tab="pro">About</button>
+  <div class="tabs" role="tablist" aria-label="Sections">
+    <button type="button" class="tab active" data-tab="controls" id="tab-controls"
+            role="tab" aria-selected="true" aria-controls="pane-controls" tabindex="0">Controls</button>
+    <button type="button" class="tab" data-tab="guide" id="tab-guide"
+            role="tab" aria-selected="false" aria-controls="pane-guide" tabindex="-1">Guide</button>
+    <button type="button" class="tab" data-tab="pro" id="tab-pro"
+            role="tab" aria-selected="false" aria-controls="pane-pro" tabindex="-1">About</button>
   </div>
 
   <!-- Controls -->
-  <section class="pane active" data-pane="controls">
+  <section class="pane active" data-pane="controls" id="pane-controls"
+           role="tabpanel" aria-labelledby="tab-controls">
     <div class="panel rack">
       <div class="rack-head">
         <span class="eyebrow">13-Band Graphic EQ &middot; 25 Hz &ndash; 16 kHz</span>
@@ -441,16 +463,18 @@
 
       <div class="rack-body">
         <div class="fader">
-          <span class="eyebrow">Vol</span>
+          <label class="eyebrow" for="volume">Vol</label>
           <div class="fader-slot">
-            <input type="range" id="volume" min="0" max="2" step="0.01" />
+            <input type="range" id="volume" min="0" max="2" step="0.01"
+                   aria-describedby="volumeVal" />
           </div>
           <span class="readout mono" id="volumeVal">100%</span>
         </div>
 
         <div class="eq-wrap">
-          <canvas id="spectrum"></canvas>
-          <svg id="eq" viewBox="0 0 630 208" preserveAspectRatio="none">
+          <canvas id="spectrum" aria-hidden="true"></canvas>
+          <svg id="eq" viewBox="0 0 630 208" preserveAspectRatio="none"
+               role="group" aria-label="13-band graphic equalizer">
             <defs>
               <!-- Mapped across the plot in user space, so every node picks up the
                    colour of its own position in the spectrum. -->
@@ -502,11 +526,15 @@
       <button type="button" class="b" id="deletePreset">Delete</button>
     </div>
 
-    <div id="statusLine" class="status" title="Click to re-check">Checking audio status…</div>
+    <!-- A button, not a div: the whole line is clickable to re-check, and a
+         button gets that keyboard behaviour for free. aria-live announces the
+         result, since status changes arrive on a timer with no user action. -->
+    <button type="button" id="statusLine" class="status" aria-live="polite"
+            title="Click to re-check">Checking audio status…</button>
   </section>
 
   <!-- Guide -->
-  <section class="pane" data-pane="guide">
+  <section class="pane" data-pane="guide" id="pane-guide" role="tabpanel" aria-labelledby="tab-guide">
     <div class="panel text-pane">
       <h3>Shaping the sound</h3>
       <p>
@@ -541,7 +569,7 @@
   </section>
 
   <!-- About -->
-  <section class="pane" data-pane="pro">
+  <section class="pane" data-pane="pro" id="pane-pro" role="tabpanel" aria-labelledby="tab-pro">
     <div class="panel text-pane">
       <h3>What this is</h3>
       <p>
