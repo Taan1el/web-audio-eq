@@ -22,6 +22,13 @@
 (() => {
   "use strict";
 
+  // Same opt-in trace flag content.js uses; see the note there.
+  const DEBUG = (() => {
+    try { return localStorage.getItem("__eqDebug") === "1"; } catch (e) { return false; }
+  })();
+  function log(...a) { if (DEBUG) console.log("[EQ]", ...a); }
+  function warn(...a) { if (DEBUG) console.warn("[EQ]", ...a); }
+
   // ---------- EQ engine (mirrors content.js, but in the page's context) ----------
   const BANDS = [25, 40, 80, 125, 200, 400, 630, 1000, 2000, 3150, 5000, 10000, 16000];
   const Q = 1.8;
@@ -107,9 +114,9 @@
         srcNode.disconnect = function () { return origDisconnect.apply(g.output, arguments); };
         try { if (el && el.dataset) el.dataset.eqMainHooked = "1"; } catch (e) {}
         postState();
-        console.log("[EQ] spliced EQ into the page's own audio graph (createMediaElementSource)");
+        log("spliced EQ into the page's own audio graph (createMediaElementSource)");
       } catch (e) {
-        console.warn("[EQ] splice failed:", e && e.message);
+        warn("splice failed:", e && e.message);
       }
       return srcNode;
     };
@@ -163,7 +170,7 @@
       el.dataset.eqAttached = "1";
       el.style.display = "none";
       (document.body || document.documentElement).appendChild(el);
-      console.log("[EQ] force-attached a PLAYING detached AUDIO so it can be hooked");
+      log("force-attached a PLAYING detached AUDIO so it can be hooked");
     } catch (e) {}
   }
 
@@ -197,5 +204,5 @@
     }
   });
 
-  console.log("[EQ] main-world injector active (EQ splicer + detached-audio attacher)");
+  log("main-world injector active (EQ splicer + detached-audio attacher)");
 })();

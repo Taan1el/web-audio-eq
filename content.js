@@ -6,6 +6,15 @@
 (() => {
   "use strict";
 
+  // Chatty tracing is off unless the page has localStorage.__eqDebug === "1".
+  // Both worlds read the same flag, so `localStorage.__eqDebug = "1"` in the
+  // console followed by a reload turns on the full trace for a bug report.
+  const DEBUG = (() => {
+    try { return localStorage.getItem("__eqDebug") === "1"; } catch (e) { return false; }
+  })();
+  function log(...a) { if (DEBUG) console.log("[EQ]", ...a); }
+  function warn(...a) { if (DEBUG) console.warn("[EQ]", ...a); }
+
   // Center frequencies (Hz) for the 13 bands — matches the UI columns.
   // ISO-preferred centers, geometrically spaced ~0.78 octave apart across the
   // audible range. Must stay in sync with inject.js and popup.js.
@@ -49,7 +58,7 @@
 
   const HOST = location.hostname;
   function siteOn(map) { return !map || map[HOST] !== false; } // default: on
-  console.log("[EQ] content script running on", HOST, "| frame:", window.top === window ? "top" : "iframe");
+  log("content script running on", HOST, "| frame:", window.top === window ? "top" : "iframe");
 
   let audioCtx = null;
   let analyser = null;           // shared FFT node for the popup visualizer
@@ -171,7 +180,7 @@
       if (dup) {
         staleHooks++;
       } else {
-        console.warn("[EQ] could NOT hook", el.tagName, "— another audio extension grabbed it first?", e && e.message);
+        warn("could NOT hook", el.tagName, "— another audio extension grabbed it first?", e && e.message);
         conflicts++;
       }
       hooked.add(el);
@@ -179,7 +188,7 @@
     }
     el.dataset.eqHooked = "1"; // mark so no other instance double-hooks it
     hooked.add(el);
-    console.log("[EQ] hooked", el.tagName, "| ctx:", ctx.state);
+    log("hooked", el.tagName, "| ctx:", ctx.state);
 
     // Quick tone nodes.
     const preamp = ctx.createGain();
@@ -226,7 +235,7 @@
     // The page already had a user gesture (the play click), so resume() succeeds
     // here even though we're outside the gesture call stack.
     if (ctx.state === "suspended" && pageActivated()) {
-      ctx.resume().then(() => console.log("[EQ] ctx resumed at hook:", ctx.state)).catch(() => {});
+      ctx.resume().then(() => log("ctx resumed at hook:", ctx.state)).catch(() => {});
     }
 
     const g = { preamp, bass, mid, treble, filters, out, comp };
@@ -239,7 +248,7 @@
   function scan() {
     const els = document.querySelectorAll("audio,video");
     if (els.length && !scanLogged) {
-      console.log("[EQ] found", els.length, "media element(s) on", HOST);
+      log("found", els.length, "media element(s) on", HOST);
       scanLogged = true;
     }
     els.forEach(hook);
@@ -256,7 +265,7 @@
 
   function resume() {
     if (audioCtx && audioCtx.state === "suspended" && pageActivated()) {
-      audioCtx.resume().then(() => console.log("[EQ] ctx resumed:", audioCtx.state)).catch(() => {});
+      audioCtx.resume().then(() => log("ctx resumed:", audioCtx.state)).catch(() => {});
     }
   }
 
