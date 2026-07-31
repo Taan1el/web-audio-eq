@@ -1,0 +1,78 @@
+name: Bug report
+description: The EQ isn't working, or isn't working right.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing: open the popup and read the **status line at the bottom**.
+        It usually names the problem directly — a conflicting audio extension, a
+        page that needs a hard refresh, or a stale hook from an old tab session.
+        Please paste what it says below.
+
+  - type: input
+    id: site
+    attributes:
+      label: Site
+      description: Where it happens. A URL is ideal; a domain is fine.
+      placeholder: soundcloud.com
+    validations:
+      required: true
+
+  - type: input
+    id: status
+    attributes:
+      label: Status line text
+      description: The exact wording from the bottom of the popup.
+      placeholder: Waiting for playback… press play on a track.
+    validations:
+      required: true
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you expected, and what you got instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open …
+        2. Press play
+        3. Drag the 80 Hz band to +10
+        4. Skip to the next track — the boost is gone
+    validations:
+      required: true
+
+  - type: textarea
+    id: console
+    attributes:
+      label: Debug log
+      description: |
+        Run `localStorage.setItem("__eqDebug", "1")` in the page console, hard-refresh
+        (Ctrl+Shift+R), reproduce, then paste the `[EQ]` lines here. This is the single
+        most useful thing you can include.
+      render: text
+
+  - type: input
+    id: chrome
+    attributes:
+      label: Chrome version
+      description: From chrome://version
+      placeholder: "138.0.7204.50"
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Ruled out
+      options:
+        - label: I hard-refreshed the page (Ctrl+Shift+R) after installing or reloading the extension.
+          required: true
+        - label: I have no other audio extension enabled (equalizer, volume booster, audio capture).
+          required: true
