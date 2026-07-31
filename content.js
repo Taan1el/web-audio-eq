@@ -27,6 +27,26 @@
 
   function dbToGain(db) { return Math.pow(10, db / 20); }
 
+  // Accepted range per setting, mirroring the popup's slider bounds. Every
+  // intake path (storage load, storage change, live popup message) goes through
+  // these, so a corrupted sync record can't produce a painfully loud output.
+  const LIMITS = { volume: [0, 2], preamp: [-12, 12], bass: [-12, 12], mid: [-12, 12], treble: [-12, 12] };
+  const GAIN_LIMIT = 25; // dB, per band
+
+  function clamp(v, lo, hi) {
+    const n = Number(v);
+    return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : null;
+  }
+  function setScalar(k, v) {
+    if (v === undefined || !LIMITS[k]) return;
+    const c = clamp(v, LIMITS[k][0], LIMITS[k][1]);
+    if (c !== null) settings[k] = c;
+  }
+  function setGains(arr) {
+    if (!Array.isArray(arr) || arr.length !== BANDS.length) return;
+    settings.gains = arr.map((g) => clamp(g, -GAIN_LIMIT, GAIN_LIMIT) ?? 0);
+  }
+
   const HOST = location.hostname;
   function siteOn(map) { return !map || map[HOST] !== false; } // default: on
   console.log("[EQ] content script running on", HOST, "| frame:", window.top === window ? "top" : "iframe");
@@ -45,6 +65,12 @@
   // AudioContext, so content.js can't re-source it. inject.js splices the EQ into
   // the page's own graph instead — but inject.js can't read chrome.storage. So we
   // forward settings to it here, and listen for how many chains it has spliced.
+  // content.js and inject.js live in the same document (isolated vs MAIN world),
+  // so pinning targetOrigin to our own origin keeps the handshake off any other
+  // origin. Opaque origins (sandboxed iframes, data: URLs) serialize to "null",
+  // which can never match a targetOrigin, so those fall back to "*".
+  const EQ_ORIGIN = location.origin && location.origin !== "null" ? location.origin : "*";
+
   function postToMain() {
     try {
       window.postMessage({
@@ -58,7 +84,7 @@
           treble: settings.treble,
           gains: settings.gains
         }
-      }, "*");
+      }, EQ_ORIGIN);
     } catch (e) {}
   }
 
@@ -259,8 +285,8 @@
   const GLOBAL_KEYS = ["volume", "preamp", "bass", "mid", "treble"];
 
   chrome.storage.sync.get(DEFAULTS, (saved) => {
-    GLOBAL_KEYS.forEach((k) => { settings[k] = saved[k]; });
-    settings.gains = Array.isArray(saved.gains) ? saved.gains.slice() : DEFAULTS.gains.slice();
+    GLOBAL_KEYS.forEach((k) => setScalar(k, saved[k]));
+    setGains(Array.isArray(saved.gains) ? saved.gains : DEFAULTS.gains);
     settings.enabled = siteOn(saved.siteEnabled); // per-site on/off
     graphs.forEach(applyToGraph);
     postToMain();
@@ -269,8 +295,8 @@
   // React to persisted changes (popup writes these on release).
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== "sync") return;
-    GLOBAL_KEYS.forEach((k) => { if (changes[k]) settings[k] = changes[k].newValue; });
-    if (changes.gains) settings.gains = changes.gains.newValue;
+    GLOBAL_KEYS.forEach((k) => { if (changes[k]) setScalar(k, changes[k].newValue); });
+    if (changes.gains) setGains(changes.gains.newValue);
     if (changes.siteEnabled) settings.enabled = siteOn(changes.siteEnabled.newValue);
     graphs.forEach(applyToGraph);
     postToMain();
@@ -281,8 +307,8 @@
   // tiny storage.sync write quota during fast dragging).
   chrome.runtime.onMessage.addListener((msg) => {
     if (!msg || msg.type !== "live") return;
-    GLOBAL_KEYS.forEach((k) => { if (msg.patch[k] !== undefined) settings[k] = msg.patch[k]; });
-    if (msg.patch.gains !== undefined) settings.gains = msg.patch.gains;
+    GLOBAL_KEYS.forEach((k) => setScalar(k, msg.patch[k]));
+    if (msg.patch.gains !== undefined) setGains(msg.patch.gains);
     if (msg.patch.enabled !== undefined) settings.enabled = msg.patch.enabled; // per-tab toggle
     graphs.forEach(applyToGraph);
     postToMain();

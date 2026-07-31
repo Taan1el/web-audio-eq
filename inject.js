@@ -78,8 +78,10 @@
     return g;
   }
 
+  const EQ_ORIGIN = location.origin && location.origin !== "null" ? location.origin : "*";
+
   function postState() {
-    try { window.postMessage({ __eq: "state", hooked: graphs.length }, "*"); } catch (e) {}
+    try { window.postMessage({ __eq: "state", hooked: graphs.length }, EQ_ORIGIN); } catch (e) {}
   }
 
   // ---------- THE SPLICE: wrap createMediaElementSource ----------
@@ -117,16 +119,36 @@
   patch(window.AudioContext);
   patch(window.webkitAudioContext);
 
+  // Accepted range per setting, mirroring the popup's slider bounds.
+  const LIMITS = { volume: [0, 2], preamp: [-12, 12], bass: [-12, 12], mid: [-12, 12], treble: [-12, 12] };
+  const GAIN_LIMIT = 25; // dB, per band
+
+  function clamp(v, lo, hi) {
+    const n = Number(v);
+    return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : null;
+  }
+
   // Receive EQ settings from content.js (which has chrome.storage access).
+  //
+  // This listener runs in the page's own world, so the page can post a lookalike
+  // message and an origin check can't tell the two apart — same document, same
+  // origin. Clamping is therefore the real guard: it keeps a hostile or simply
+  // buggy page (and corrupted storage) from slamming the output to a level that
+  // could hurt ears or speakers.
   window.addEventListener("message", (e) => {
     if (e.source !== window) return;
     const d = e.data;
     if (!d || d.__eq !== "settings" || !d.settings) return;
     const s = d.settings;
-    ["enabled", "volume", "preamp", "bass", "mid", "treble"].forEach((k) => {
-      if (s[k] !== undefined) settings[k] = s[k];
+    if (s.enabled !== undefined) settings.enabled = !!s.enabled;
+    Object.keys(LIMITS).forEach((k) => {
+      if (s[k] === undefined) return;
+      const v = clamp(s[k], LIMITS[k][0], LIMITS[k][1]);
+      if (v !== null) settings[k] = v;
     });
-    if (Array.isArray(s.gains)) settings.gains = s.gains.slice();
+    if (Array.isArray(s.gains) && s.gains.length === BANDS.length) {
+      settings.gains = s.gains.map((g) => clamp(g, -GAIN_LIMIT, GAIN_LIMIT) ?? 0);
+    }
     graphs.forEach(applyToGraph);
   });
 
