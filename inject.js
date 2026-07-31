@@ -23,8 +23,8 @@
   "use strict";
 
   // ---------- EQ engine (mirrors content.js, but in the page's context) ----------
-  const BANDS = [5, 10, 20, 40, 80, 160, 320, 640, 1280, 2560, 5120, 10240, 20480];
-  const Q = 1.4;
+  const BANDS = [25, 40, 80, 125, 200, 400, 630, 1000, 2000, 3150, 5000, 10000, 16000];
+  const Q = 1.8;
   function dbToGain(db) { return Math.pow(10, db / 20); }
 
   let settings = {

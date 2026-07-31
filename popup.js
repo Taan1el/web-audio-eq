@@ -2,8 +2,9 @@
 // content script. Live drag updates are messaged straight to the active tab
 // (fast, no storage quota). Final values are persisted to chrome.storage.sync.
 
-const BANDS = [5, 10, 20, 40, 80, 160, 320, 640, 1280, 2560, 5120, 10240, 20480];
-const LABELS = ["5", "10", "20", "40", "80", "160", "320", "640", "1280", "2560", "5120", "10240", "20480"];
+// Must stay in sync with content.js / inject.js.
+const BANDS = [25, 40, 80, 125, 200, 400, 630, 1000, 2000, 3150, 5000, 10000, 16000];
+const LABELS = ["25", "40", "80", "125", "200", "400", "630", "1k", "2k", "3.1k", "5k", "10k", "16k"];
 const DB_MIN = -25, DB_MAX = 25;
 
 const DEFAULTS = {
@@ -16,8 +17,8 @@ const DEFAULTS = {
   gains: new Array(BANDS.length).fill(0)
 };
 
-// Bass Boost curve (warm low end).
-const BASS_BOOST = [4, 6, 8, 9, 8, 5, 2, 0, 0, 0, 0, 0, 0];
+// Bass Boost curve (warm low end), shaped for the band centers above.
+const BASS_BOOST = [6, 7, 6, 4.5, 3, 1.5, 0, 0, 0, 0, 0, 0, 0];
 
 // ---- SVG plot geometry (matches viewBox 0 0 660 380) ----
 const W = 660, H = 380;
