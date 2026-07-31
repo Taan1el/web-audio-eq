@@ -4,7 +4,7 @@ A real 13-band graphic equalizer for any website's audio and video — SoundClou
 YouTube, Bandcamp, podcasts, plain `<audio>` and `<video>`, anything that plays
 through the page.
 
-[![CI](https://github.com/YOUR-USERNAME/web-audio-eq/actions/workflows/ci.yml/badge.svg)](https://github.com/YOUR-USERNAME/web-audio-eq/actions/workflows/ci.yml)
+[![CI](https://github.com/Taan1el/web-audio-eq/actions/workflows/ci.yml/badge.svg)](https://github.com/Taan1el/web-audio-eq/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Manifest V3](https://img.shields.io/badge/Chrome-Manifest%20V3-4285F4.svg)](manifest.json)
 

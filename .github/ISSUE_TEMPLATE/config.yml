@@ -1,8 +1,8 @@
 blank_issues_enabled: true
 contact_links:
   - name: Security vulnerability
-    url: https://github.com/YOUR-USERNAME/web-audio-eq/security/advisories/new
+    url: https://github.com/Taan1el/web-audio-eq/security/advisories/new
     about: Report privately. Please do not open a public issue for a security problem.
   - name: Site doesn't work at all
-    url: https://github.com/YOUR-USERNAME/web-audio-eq/blob/main/README.md#troubleshooting
+    url: https://github.com/Taan1el/web-audio-eq/blob/main/README.md#troubleshooting
     about: Check the troubleshooting notes first — most reports are a missing hard refresh or a conflicting audio extension.
