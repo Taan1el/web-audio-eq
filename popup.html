@@ -2,156 +2,504 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <title>Web Audio EQ</title>
   <style>
+    /* ------------------------------------------------------------------
+       Aesthetic: outboard studio rack gear. Near-black chassis, hairline
+       bevels, monospace technical readouts, and one bright moment — the
+       response curve, lit with the same coral-to-violet sweep as the icon.
+       Chromium-only target, so the native controls are fully restyled.
+       ------------------------------------------------------------------ */
     :root {
-      --bg: #27374e;
-      --panel: #223149;
-      --text: #e8edf2;
-      --muted: #9fb0c3;
-      --line: rgba(233, 240, 248, 0.7);
-      --grid: rgba(233, 240, 248, 0.12);
-      --node: #f4f7fb;
-      --accent: #e0413c;
-      --btn-border: #5a6b82;
+      --chassis: #0b0e13;
+      --panel-hi: #171c25;
+      --panel-lo: #12161d;
+      --hairline: #232b36;
+      --hairline-soft: #1b212b;
+
+      --text: #e8edf4;
+      --muted: #7e8a9a;
+      --dim: #5a6675;
+
+      --coral: #ff5c57;
+      --violet: #c084fc;
+      --good: #4ade80;
+      --warn: #fbbf24;
+
+      --grid: rgba(232, 237, 244, 0.07);
+
+      --font-ui: "Segoe UI Variable Display", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", sans-serif;
+      --font-mono: "Cascadia Mono", "Cascadia Code", ui-monospace, "SF Mono", Consolas, "Liberation Mono", monospace;
+
+      --ease: cubic-bezier(.2, .7, .3, 1);
     }
+
     * { box-sizing: border-box; }
+
     body {
       width: 760px;
       margin: 0;
-      padding: 14px 18px;
-      font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
-      background: var(--bg);
+      padding: 16px;
+      font-family: var(--font-ui);
+      background:
+        radial-gradient(720px 300px at 62% -8%, rgba(192, 132, 252, .10), transparent 70%),
+        radial-gradient(560px 260px at 12% 108%, rgba(255, 92, 87, .09), transparent 70%),
+        var(--chassis);
       color: var(--text);
       user-select: none;
+      position: relative;
     }
-    header { display: flex; justify-content: space-between; align-items: flex-start; }
-    header h1 { font-size: 22px; font-weight: 800; margin: 0; letter-spacing: .3px; }
-    .warn { text-align: right; font-size: 11px; color: var(--muted); font-style: italic; line-height: 1.5; }
-    .warn a { color: var(--muted); }
 
-    .tabs { display: flex; gap: 6px; margin: 12px 0 6px; }
-    .tab {
-      padding: 5px 12px; font-size: 12px; color: var(--text);
-      background: var(--panel); border: 1px solid var(--btn-border);
-      border-radius: 5px 5px 0 0; cursor: pointer;
+    /* Fine grain so the large flat panels read as machined metal, not flat fill. */
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 99;
+      opacity: .035;
+      mix-blend-mode: overlay;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
     }
-    .tab.active { background: #34486a; }
+
+    /* ---------- shared surfaces ---------- */
+    .panel {
+      background: linear-gradient(180deg, var(--panel-hi), var(--panel-lo));
+      border: 1px solid var(--hairline);
+      border-radius: 12px;
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, .04),
+        0 10px 28px -16px rgba(0, 0, 0, .9);
+    }
+
+    .eyebrow {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .16em;
+      text-transform: uppercase;
+      color: var(--dim);
+    }
+
+    .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+    /* ---------- masthead ---------- */
+    .masthead {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 20px;
+      padding-bottom: 11px;
+      border-bottom: 1px solid var(--hairline-soft);
+    }
+
+    .brand { display: flex; align-items: center; gap: 11px; }
+    .brand-mark { width: 27px; height: 27px; flex: none; }
+
+    .brand h1 {
+      margin: 0;
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: .17em;
+      text-transform: uppercase;
+    }
+
+    .tagline {
+      margin: 3px 0 0;
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: .02em;
+    }
+
+    .caution {
+      margin: 0;
+      max-width: 300px;
+      padding-left: 11px;
+      border-left: 2px solid var(--warn);
+      font-size: 11px;
+      line-height: 1.5;
+      color: var(--muted);
+    }
+
+    /* ---------- tabs (segmented control) ---------- */
+    .tabs {
+      display: inline-flex;
+      gap: 2px;
+      margin: 10px 0 10px;
+      padding: 3px;
+      background: var(--panel-lo);
+      border: 1px solid var(--hairline);
+      border-radius: 9px;
+    }
+
+    .tab {
+      padding: 6px 15px;
+      font-family: inherit;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .13em;
+      text-transform: uppercase;
+      color: var(--muted);
+      background: transparent;
+      border: 0;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: color .16s var(--ease), background .16s var(--ease);
+    }
+    .tab:hover { color: var(--text); }
+    .tab.active {
+      color: var(--text);
+      background: linear-gradient(180deg, #262f3c, #1b212b);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, .07);
+    }
 
     .pane { display: none; }
     .pane.active { display: block; }
 
-    /* ---- Controls pane ---- */
-    .controls-row { display: flex; gap: 10px; align-items: stretch; }
-    .side { display: flex; gap: 8px; }
-    .spectrum-btn {
-      writing-mode: vertical-rl; transform: rotate(180deg);
-      padding: 8px 4px; font-size: 11px; color: var(--text);
-      background: var(--panel); border: 1px solid var(--btn-border);
-      border-radius: 5px; cursor: pointer;
+    /* ---------- the rack: fader + response curve + tone ---------- */
+    /* Everything that shapes the signal lives in one panel. Chrome caps popups
+       at 600px tall, and a second panel's padding and margin cost ~40px of that
+       budget for no gain in clarity. */
+    .rack { padding: 11px 14px 12px; }
+
+    .rack-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 9px;
     }
-    .vol { display: flex; flex-direction: column; align-items: center; justify-content: center; }
-    .vol .lbl { font-size: 11px; color: var(--muted); margin-bottom: 6px; }
-    .vol input[type="range"] {
-      writing-mode: vertical-lr; direction: rtl;
-      width: 22px; height: 248px; accent-color: var(--node);
+
+    .rack-body { display: flex; gap: 16px; }
+
+    /* Vertical fader.
+       A rotated horizontal range, rather than a vertical one: Chrome only
+       gained writing-mode support for range inputs in 121, and we support 111. */
+    .fader { width: 52px; flex: none; display: flex; flex-direction: column; align-items: center; }
+    .fader-slot { position: relative; width: 52px; height: 164px; }
+    .fader-slot input[type="range"] {
+      position: absolute;
+      top: 50%; left: 50%;
+      width: 164px;
+      transform: translate(-50%, -50%) rotate(-90deg);
     }
-    .eq-wrap { flex: 1; position: relative; }
+    .fader .readout { margin-top: 7px; font-size: 11px; color: var(--text); }
+    .fader .eyebrow { margin-bottom: 7px; }
+
+    .eq-wrap { position: relative; width: 630px; height: 208px; flex: none; }
     #spectrum { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none; }
-    svg#eq { display: block; position: relative; z-index: 1; width: 100%; height: 286px; background: transparent; touch-action: none; }
-    svg#eq text { fill: var(--muted); font-size: 10px; }
+    svg#eq { position: relative; z-index: 1; display: block; width: 630px; height: 208px; touch-action: none; }
+
+    svg#eq text { fill: var(--dim); font-family: var(--font-mono); font-size: 9px; }
     svg#eq line { stroke: var(--grid); }
-    .curve { fill: none; stroke: var(--line); stroke-width: 2; }
-    .node { fill: var(--node); cursor: ns-resize; }
-    .node.red { fill: var(--accent); }
 
-    .actions {
-      display: flex; justify-content: flex-end; gap: 8px;
-      margin-top: 8px; flex-wrap: wrap;
+    .curve {
+      fill: none;
+      stroke: url(#curveGrad);
+      stroke-width: 2.5;
+      stroke-linecap: round;
+      filter: url(#curveGlow);
     }
-    .actions input[type="text"] {
-      background: var(--panel); border: 1px solid var(--btn-border);
-      color: var(--text); border-radius: 5px; padding: 5px 8px; font-size: 12px; width: 120px;
-    }
-    button.b {
-      padding: 5px 10px; font-size: 12px; color: var(--text);
-      background: var(--panel); border: 1px solid var(--btn-border);
-      border-radius: 5px; cursor: pointer;
-    }
-    button.b:hover { background: #34486a; }
-    button.b.on { background: var(--accent); border-color: var(--accent); }
-    .center-row { text-align: center; margin-top: 10px; }
 
-    .status {
-      margin-top: 10px; text-align: center; font-size: 12px;
-      padding: 7px 8px; border-radius: 5px; background: var(--panel);
-      color: var(--muted); cursor: pointer; line-height: 1.4;
+    .node {
+      fill: url(#curveGrad);
+      stroke: var(--chassis);
+      stroke-width: 1.5;
+      cursor: ns-resize;
+      transition: r .12s var(--ease);
     }
-    .status.good { color: #7fd18f; }
-    .status.bad  { color: var(--accent); }
-    .status.warnx { color: #e0b84a; }
+    .node:hover { r: 8; }
 
-    .tone { display: flex; gap: 16px; margin-top: 10px; padding: 8px 4px 2px; border-top: 1px solid var(--grid); }
+    /* ---------- tone row (inside the rack) ---------- */
+    .tone {
+      display: flex;
+      gap: 16px;
+      margin-top: 11px;
+      padding-top: 11px;
+      border-top: 1px solid var(--hairline-soft);
+    }
     .tone .t { flex: 1; }
-    .tone label { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-bottom: 3px; }
-    .tone label .v { color: var(--accent); font-variant-numeric: tabular-nums; }
-    .tone input[type="range"] { width: 100%; accent-color: var(--node); }
+    .tone label {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 7px;
+    }
+    .tone .v { font-size: 11px; color: var(--coral); }
 
-    footer { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); font-style: italic; margin-top: 12px; }
+    /* Detent tick marking the 0 dB centre of each tone slider. */
+    .slider-wrap { position: relative; }
+    .slider-wrap::after {
+      content: "";
+      position: absolute;
+      left: 50%; top: 50%;
+      width: 1px; height: 9px;
+      margin-top: -4.5px;
+      background: var(--hairline);
+      pointer-events: none;
+    }
 
-    .text-pane { font-size: 12px; line-height: 1.6; color: var(--text); padding: 6px 2px; }
-    .text-pane h3 { margin: 8px 0 4px; }
-    .text-pane code { background: var(--panel); padding: 1px 5px; border-radius: 4px; }
+    /* ---------- range inputs ---------- */
+    input[type="range"] {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 100%;
+      height: 18px;
+      background: transparent;
+      cursor: pointer;
+    }
+    input[type="range"]::-webkit-slider-runnable-track {
+      height: 4px;
+      border-radius: 3px;
+      background: linear-gradient(90deg, #222a35, #2d3644);
+      box-shadow: inset 0 1px 2px rgba(0, 0, 0, .6);
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 14px; height: 14px;
+      margin-top: -5px;
+      border-radius: 50%;
+      border: 1px solid #05070a;
+      background: linear-gradient(180deg, #f4f7fb, #c3cedb);
+      box-shadow: 0 1px 3px rgba(0, 0, 0, .7), 0 0 0 0 rgba(255, 92, 87, 0);
+      transition: box-shadow .16s var(--ease), transform .12s var(--ease);
+    }
+    input[type="range"]:hover::-webkit-slider-thumb { transform: scale(1.09); }
+    input[type="range"]:focus-visible { outline: none; }
+    input[type="range"]:focus-visible::-webkit-slider-thumb {
+      box-shadow: 0 1px 3px rgba(0, 0, 0, .7), 0 0 0 4px rgba(255, 92, 87, .3);
+    }
+
+    /* ---------- buttons + preset row ---------- */
+    .console {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 10px;
+      padding: 10px 12px;
+    }
+    .console .spacer { flex: 1; }
+
+    .b {
+      padding: 7px 13px;
+      font-family: inherit;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: .04em;
+      color: var(--text);
+      background: linear-gradient(180deg, #212936, #191f28);
+      border: 1px solid var(--hairline);
+      border-radius: 7px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: border-color .16s var(--ease), background .16s var(--ease), transform .1s var(--ease);
+    }
+    .b:hover { border-color: #36404f; background: linear-gradient(180deg, #273040, #1d2431); }
+    .b:active { transform: translateY(1px); }
+    .b:focus-visible { outline: 2px solid var(--coral); outline-offset: 2px; }
+
+    /* Toggles light up coral when engaged (spectrum on, EQ stopped). */
+    .b.on {
+      color: #fff;
+      background: linear-gradient(180deg, #ff6b66, #e5433e);
+      border-color: #ff6b66;
+    }
+    .b.on:hover { background: linear-gradient(180deg, #ff7a75, #ef4a45); border-color: #ff7a75; }
+
+    .b.ghost { background: transparent; }
+
+    input[type="text"] {
+      width: 132px;
+      padding: 7px 10px;
+      font-family: inherit;
+      font-size: 11px;
+      color: var(--text);
+      background: #0e1218;
+      border: 1px solid var(--hairline);
+      border-radius: 7px;
+      box-shadow: inset 0 1px 2px rgba(0, 0, 0, .5);
+    }
+    input[type="text"]::placeholder { color: var(--dim); }
+    input[type="text"]:focus { outline: none; border-color: var(--coral); }
+
+    /* ---------- status bar ---------- */
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 10px;
+      padding: 9px 13px;
+      font-size: 11.5px;
+      line-height: 1.45;
+      color: var(--muted);
+      background: var(--panel-lo);
+      border: 1px solid var(--hairline);
+      border-radius: 9px;
+      cursor: pointer;
+      transition: border-color .16s var(--ease);
+    }
+    .status:hover { border-color: #36404f; }
+    .status::before {
+      content: "";
+      flex: none;
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--dim);
+      box-shadow: 0 0 0 3px rgba(126, 138, 154, .12);
+    }
+    .status.good { color: var(--good); }
+    .status.good::before { background: var(--good); box-shadow: 0 0 0 3px rgba(74, 222, 128, .16); }
+    .status.warnx { color: var(--warn); }
+    .status.warnx::before { background: var(--warn); box-shadow: 0 0 0 3px rgba(251, 191, 36, .16); }
+    .status.bad { color: var(--coral); }
+    .status.bad::before { background: var(--coral); box-shadow: 0 0 0 3px rgba(255, 92, 87, .18); }
+
+    /* ---------- prose panes ---------- */
+    .text-pane { padding: 16px 18px; font-size: 12.5px; line-height: 1.65; color: var(--muted); }
+    .text-pane h3 {
+      margin: 18px 0 7px;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .16em;
+      text-transform: uppercase;
+      color: var(--text);
+    }
+    .text-pane h3:first-child { margin-top: 0; }
+    .text-pane b { color: var(--text); font-weight: 600; }
+    .text-pane p { margin: 0 0 9px; }
+    .text-pane code {
+      padding: 2px 6px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text);
+      background: #0e1218;
+      border: 1px solid var(--hairline);
+      border-radius: 5px;
+    }
+    .text-pane .kbd-hint { color: var(--dim); }
+
+    /* ---------- entrance ---------- */
+    @keyframes rise {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: none; }
+    }
+    .masthead, .tabs, .pane.active > * {
+      animation: rise .24s var(--ease) backwards;
+    }
+    .tabs { animation-delay: .04s; }
+    .pane.active > *:nth-child(1) { animation-delay: .07s; }
+    .pane.active > *:nth-child(2) { animation-delay: .11s; }
+    .pane.active > *:nth-child(3) { animation-delay: .15s; }
+    .pane.active > *:nth-child(4) { animation-delay: .19s; }
+
+    @media (prefers-reduced-motion: reduce) {
+      * { animation: none !important; transition: none !important; }
+    }
   </style>
 </head>
 <body>
-  <header>
-    <h1>Web Audio EQ</h1>
-    <div class="warn">
-      Warning: Loud audio damages hearing/speakers! Listen responsibly :)<br />
-      Works on every site's audio &amp; video — survives every track change.
+  <header class="masthead">
+    <div class="brand">
+      <svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true">
+        <defs>
+          <linearGradient id="markGrad" x1="0" y1="0" x2="24" y2="0" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#ff5c57" />
+            <stop offset="1" stop-color="#c084fc" />
+          </linearGradient>
+        </defs>
+        <g stroke="#3a4352" stroke-width="1.6" stroke-linecap="round">
+          <line x1="6" y1="3.5" x2="6" y2="20.5" />
+          <line x1="12" y1="3.5" x2="12" y2="20.5" />
+          <line x1="18" y1="3.5" x2="18" y2="20.5" />
+        </g>
+        <g fill="url(#markGrad)">
+          <rect x="3.2" y="6.6" width="5.6" height="3.6" rx="1.8" />
+          <rect x="9.2" y="13.2" width="5.6" height="3.6" rx="1.8" />
+          <rect x="15.2" y="9.4" width="5.6" height="3.6" rx="1.8" />
+        </g>
+      </svg>
+      <div>
+        <h1>Web Audio EQ</h1>
+        <p class="tagline">13 bands &middot; every site &middot; survives track changes</p>
+      </div>
     </div>
+    <p class="caution">Loud audio can damage your hearing and your speakers. Raise levels gradually.</p>
   </header>
 
   <div class="tabs">
-    <div class="tab active" data-tab="controls">Controls</div>
-    <div class="tab" data-tab="guide">Guide</div>
-    <div class="tab" data-tab="pro">About</div>
+    <button type="button" class="tab active" data-tab="controls">Controls</button>
+    <button type="button" class="tab" data-tab="guide">Guide</button>
+    <button type="button" class="tab" data-tab="pro">About</button>
   </div>
 
   <!-- Controls -->
   <section class="pane active" data-pane="controls">
-    <div class="controls-row">
-      <div class="side">
-        <button class="spectrum-btn" id="spectrumBtn" title="Visualizer (coming soon)">Spectrum Visualizer</button>
-        <div class="vol">
-          <span class="lbl">volume</span>
-          <input type="range" id="volume" min="0" max="2" step="0.01" />
+    <div class="panel rack">
+      <div class="rack-head">
+        <span class="eyebrow">13-Band Graphic EQ &middot; 25 Hz &ndash; 16 kHz</span>
+        <button type="button" class="b ghost" id="spectrumBtn">Spectrum</button>
+      </div>
+
+      <div class="rack-body">
+        <div class="fader">
+          <span class="eyebrow">Vol</span>
+          <div class="fader-slot">
+            <input type="range" id="volume" min="0" max="2" step="0.01" />
+          </div>
+          <span class="readout mono" id="volumeVal">100%</span>
+        </div>
+
+        <div class="eq-wrap">
+          <canvas id="spectrum"></canvas>
+          <svg id="eq" viewBox="0 0 630 208" preserveAspectRatio="none">
+            <defs>
+              <!-- Mapped across the plot in user space, so every node picks up the
+                   colour of its own position in the spectrum. -->
+              <linearGradient id="curveGrad" x1="0" y1="0" x2="630" y2="0" gradientUnits="userSpaceOnUse">
+                <stop offset="0" stop-color="#ff5c57" />
+                <stop offset="0.5" stop-color="#f472b6" />
+                <stop offset="1" stop-color="#c084fc" />
+              </linearGradient>
+              <filter id="curveGlow" x="-20%" y="-40%" width="140%" height="180%">
+                <feGaussianBlur stdDeviation="3.5" result="blur" />
+                <feMerge>
+                  <feMergeNode in="blur" />
+                  <feMergeNode in="SourceGraphic" />
+                </feMerge>
+              </filter>
+            </defs>
+          </svg>
         </div>
       </div>
-      <div class="eq-wrap">
-        <canvas id="spectrum"></canvas>
-        <svg id="eq" viewBox="0 0 660 380" preserveAspectRatio="none"></svg>
+
+      <div class="tone">
+        <div class="t">
+          <label for="bass"><span class="eyebrow">Bass</span><span class="v mono" id="bassVal"></span></label>
+          <div class="slider-wrap"><input type="range" id="bass" min="-12" max="12" step="0.5" /></div>
+        </div>
+        <div class="t">
+          <label for="mid"><span class="eyebrow">Mid</span><span class="v mono" id="midVal"></span></label>
+          <div class="slider-wrap"><input type="range" id="mid" min="-12" max="12" step="0.5" /></div>
+        </div>
+        <div class="t">
+          <label for="treble"><span class="eyebrow">Treble</span><span class="v mono" id="trebleVal"></span></label>
+          <div class="slider-wrap"><input type="range" id="treble" min="-12" max="12" step="0.5" /></div>
+        </div>
+        <div class="t">
+          <label for="preamp"><span class="eyebrow">Preamp</span><span class="v mono" id="preampVal"></span></label>
+          <div class="slider-wrap"><input type="range" id="preamp" min="-12" max="12" step="0.5" /></div>
+        </div>
       </div>
     </div>
 
-    <div class="tone">
-      <div class="t"><label>Bass <span class="v" id="bassVal"></span></label><input type="range" id="bass" min="-12" max="12" step="0.5" /></div>
-      <div class="t"><label>Mid <span class="v" id="midVal"></span></label><input type="range" id="mid" min="-12" max="12" step="0.5" /></div>
-      <div class="t"><label>Treble <span class="v" id="trebleVal"></span></label><input type="range" id="treble" min="-12" max="12" step="0.5" /></div>
-      <div class="t"><label>Preamp <span class="v" id="preampVal"></span></label><input type="range" id="preamp" min="-12" max="12" step="0.5" /></div>
-    </div>
-
-    <div class="actions">
-      <input type="text" id="presetName" placeholder="Preset Name" list="presetList" />
+    <div class="panel console">
+      <button type="button" class="b" id="stopBtn">Stop EQing This Tab</button>
+      <span class="spacer"></span>
+      <button type="button" class="b" id="reset">Reset</button>
+      <button type="button" class="b" id="bassBoost">Bass Boost</button>
+      <input type="text" id="presetName" placeholder="Preset name" list="presetList" />
       <datalist id="presetList"></datalist>
-      <button class="b" id="savePreset">+ Save Preset</button>
-      <button class="b" id="deletePreset">- Delete Preset</button>
-      <button class="b" id="reset">Reset Filters</button>
-      <button class="b" id="bassBoost">Bass Boost</button>
-    </div>
-
-    <div class="center-row">
-      <button class="b" id="stopBtn">Stop EQing This Tab</button>
+      <button type="button" class="b" id="savePreset">Save</button>
+      <button type="button" class="b" id="deletePreset">Delete</button>
     </div>
 
     <div id="statusLine" class="status" title="Click to re-check">Checking audio status…</div>
@@ -159,33 +507,60 @@
 
   <!-- Guide -->
   <section class="pane" data-pane="guide">
-    <div class="text-pane">
-      <h3>How to use</h3>
-      Drag any white dot up/down to boost or cut that frequency band (-25 to +25 dB).<br />
-      Left slider = overall <b>volume</b>. <b>Bass Boost</b> loads a warm low-end curve.<br />
-      <b>Reset Filters</b> flattens everything. <b>Spectrum Visualizer</b> (left button) draws live frequency bars behind the curve.<br />
-      <b>Stop EQing</b> is now <b>per-site</b>: it remembers on/off for each website (e.g. on for YouTube, off for Netflix). Volume still applies.<br />
+    <div class="panel text-pane">
+      <h3>Shaping the sound</h3>
+      <p>
+        Drag any dot on the curve up or down to boost or cut that frequency band, from
+        &minus;25 to +25&nbsp;dB. The left fader is overall <b>volume</b>, and the four
+        sliders underneath are broad tone shelves layered on top of the 13 bands.
+      </p>
+      <p class="kbd-hint">
+        Every control is reachable from the keyboard: <code>Tab</code> to a dot, then
+        arrow keys to move it. <code>Home</code> flattens that band.
+      </p>
+
       <h3>Presets</h3>
-      Type a name, hit <code>+ Save Preset</code>. Pick a saved name from the box to load it; <code>- Delete Preset</code> removes it.<br />
+      <p>
+        Type a name and press <code>Save</code>. Pick a saved name from the box to load it,
+        or press <code>Delete</code> to remove it. <b>Bass Boost</b> loads a warm low-end
+        curve; <b>Reset</b> flattens everything back to zero.
+      </p>
+
+      <h3>Per-site on and off</h3>
+      <p>
+        The stop button is remembered <b>per website</b> — you can leave the EQ on for
+        YouTube and off for Netflix. Volume keeps working either way.
+      </p>
+
       <h3>If audio goes silent</h3>
-      Another audio extension (e.g. AIRS) grabbed the stream first. Disable it and reload the tab.
+      <p>
+        Another audio extension has probably claimed the stream first, since a media
+        element can only be captured once. Disable the other extension and reload the tab.
+      </p>
     </div>
   </section>
 
   <!-- About -->
   <section class="pane" data-pane="pro">
-    <div class="text-pane">
-      <h3>Web Audio EQ</h3>
-      Custom 13-band Web Audio equalizer for any website's audio &amp; video. Re-applies itself on
-      every track change, so your settings never reset between songs.<br /><br />
-      Runs on all sites (YouTube, SoundCloud, Spotify web, etc.). EQ settings are shared across all tabs.
+    <div class="panel text-pane">
+      <h3>What this is</h3>
+      <p>
+        A 13-band Web Audio equalizer for any site that plays audio or video. It re-applies
+        itself every time a new track starts, so your settings never reset between songs.
+      </p>
+
+      <h3>Privacy</h3>
+      <p>
+        The extension makes no network requests and collects nothing. Your curve is stored
+        in Chrome's own synced settings so it follows your profile across devices.
+      </p>
+
+      <h3>Scope</h3>
+      <p>
+        EQ settings are global and shared across tabs; only the on/off switch is per-site.
+      </p>
     </div>
   </section>
-
-  <footer>
-    <span>Web Audio EQ</span>
-    <span>Automatically EQs while audio is playing!</span>
-  </footer>
 
   <script src="popup.js"></script>
 </body>

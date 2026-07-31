@@ -20,9 +20,11 @@ const DEFAULTS = {
 // Bass Boost curve (warm low end), shaped for the band centers above.
 const BASS_BOOST = [6, 7, 6, 4.5, 3, 1.5, 0, 0, 0, 0, 0, 0, 0];
 
-// ---- SVG plot geometry (matches viewBox 0 0 660 380) ----
-const W = 660, H = 380;
-const PAD = { l: 34, r: 16, t: 18, b: 34 };
+// ---- SVG plot geometry ----
+// These match the viewBox AND the rendered CSS size 1:1, so the plot never gets
+// scaled non-uniformly and the round nodes stay round.
+const W = 630, H = 208;
+const PAD = { l: 34, r: 16, t: 12, b: 24 };
 const plotW = W - PAD.l - PAD.r;
 const plotH = H - PAD.t - PAD.b;
 
@@ -74,6 +76,9 @@ function buildGrid() {
     line.setAttribute("stroke-width", db === 0 ? 1.4 : 1);
     svg.appendChild(line);
 
+    // Rule every 5 dB, but only label every 10 — at this plot height the full
+    // set of labels crowds into an unreadable stack.
+    if (db % 10 !== 0) continue;
     const t = document.createElementNS(SVG_NS, "text");
     t.setAttribute("x", PAD.l - 6); t.setAttribute("y", y + 3);
     t.setAttribute("text-anchor", "end");
@@ -180,8 +185,13 @@ function persist(obj) {
 
 // ---- Volume slider ----
 const volume = document.getElementById("volume");
+const volumeVal = document.getElementById("volumeVal");
+function volumeLabel() {
+  if (volumeVal) volumeVal.textContent = Math.round(settings.volume * 100) + "%";
+}
 volume.addEventListener("input", () => {
   settings.volume = parseFloat(volume.value);
+  volumeLabel();
   sendLive({ volume: settings.volume });
   persist({ volume: settings.volume });
 });
@@ -311,13 +321,25 @@ function sizeCanvas() {
   const r = canvas.parentElement.getBoundingClientRect();
   canvas.width = Math.max(1, Math.round(r.width));
   canvas.height = Math.max(1, Math.round(r.height));
+  barGrad = null; // gradient is tied to the old width
+}
+// Cached because the gradient only changes when the canvas is resized.
+let barGrad = null;
+function barGradient(Wd) {
+  if (!barGrad) {
+    barGrad = cctx.createLinearGradient(0, 0, Wd, 0);
+    barGrad.addColorStop(0, "rgba(255, 92, 87, 0.26)");
+    barGrad.addColorStop(0.5, "rgba(244, 114, 182, 0.24)");
+    barGrad.addColorStop(1, "rgba(192, 132, 252, 0.26)");
+  }
+  return barGrad;
 }
 function drawBars(bars) {
   if (!cctx) return;
   const Wd = canvas.width, Hd = canvas.height;
   cctx.clearRect(0, 0, Wd, Hd);
   const n = bars.length, bw = Wd / n;
-  cctx.fillStyle = "rgba(180, 200, 220, 0.22)";
+  cctx.fillStyle = barGradient(Wd);
   for (let i = 0; i < n; i++) {
     const h = (bars[i] / 255) * Hd;
     cctx.fillRect(i * bw, Hd - h, bw * 0.85, h);
@@ -428,6 +450,7 @@ getActiveHost((host) => {
       : DEFAULTS.gains.slice();
     presets = s.presets || {};
     volume.value = settings.volume;
+    volumeLabel();
     TONE.forEach((n) => {
       settings[n] = s[n];
       document.getElementById(n).value = s[n];
